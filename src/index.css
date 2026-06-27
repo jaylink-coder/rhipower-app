@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.animate-slide-up { animation: slideUp 0.3s ease-out forwards; }
+
+/* ── Print / PDF styles ─────────────────────────────────────────────────── */
+@media print {
+  /* Hide all interactive UI */
+  .print\:hidden { display: none !important; }
+
+  /* Clean white background throughout */
+  body, html { background: white !important; color: black !important; }
+
+  /* Remove shadows and rounded corners for cleaner print */
+  * { box-shadow: none !important; }
+
+  /* Make everything readable */
+  .font-mono { font-family: Courier New, monospace !important; }
+
+  /* Force page break before BOM zones */
+  .page-break-before { page-break-before: always; }
+
+  /* Ensure dark backgrounds become white with black text */
+  .bg-gray-900 {
+    background-color: white !important;
+    color: black !important;
+    border: 1px solid #ccc !important;
+  }
+
+  /* Print header — injected via :before on the main wrapper */
+  main::before, #root > div::before {
+    content: "RhiPower Systems  ·  Engineering Solar Proposal  ·  jaylinkpowersystems@gmail.com";
+    display: block;
+    text-align: center;
+    font-size: 10px;
+    color: #666;
+    margin-bottom: 16px;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 8px;
+  }
+
+  /* Margins */
+  @page {
+    margin: 20mm 15mm;
+  }
+}
