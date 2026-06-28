@@ -3,7 +3,7 @@
 
 export const BUSINESS = {
   name:      'RhiPower Systems',
-  whatsapp:  '+254700000000',   // ← REPLACE with your real WhatsApp number (include country code)
+  whatsapp:  '+254112839259',
   email:     'jaylinkpowersystems@gmail.com',
   city:      'Nairobi, Kenya',
   tagline:   'Smart Solar & Energy Storage Engineering Platform',
