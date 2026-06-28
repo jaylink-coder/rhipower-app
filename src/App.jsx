@@ -4,9 +4,11 @@ import Step0_Welcome    from './pages/Step0_Welcome.jsx'
 import Step1_SiteConfig from './pages/Step1_SiteConfig.jsx'
 import Step2_Loads      from './pages/Step2_Loads.jsx'
 import Step3_Results    from './pages/Step3_Results.jsx'
+import AdminInventory   from './pages/AdminInventory.jsx'
 import { DEFAULT_APPLIANCES } from './data/appliances.js'
 import { fetchSolarData }     from './lib/nasaPower.js'
 import { runCalculation }     from './lib/calculator.js'
+import { fetchInventory }     from './lib/inventory.js'
 import './App.css'
 
 const STEP_LABELS = ['Site & Intent', 'Electrical Loads', 'Results & Quote']
@@ -23,13 +25,20 @@ const DEFAULT_CONFIG = {
 }
 
 export default function App() {
-  const [step,          setStep]          = useState(0)           // 0 = welcome screen
-  const [clientProfile, setClientProfile] = useState(null)        // 'homeowner' | 'diy' | 'professional' | 'business'
+  const [step,          setStep]          = useState(0)
+  const [clientProfile, setClientProfile] = useState(null)
   const [siteConfig,    setSiteConfig]    = useState(DEFAULT_CONFIG)
   const [appliances,    setAppliances]    = useState(DEFAULT_APPLIANCES)
   const [quantities,    setQuantities]    = useState({})
   const [allResults,    setAllResults]    = useState(null)
   const [nasaLoading,   setNasaLoading]   = useState(false)
+  const [inventory,     setInventory]     = useState(null)   // null = use hardcoded fallback
+  const [showAdmin,     setShowAdmin]     = useState(false)
+
+  // Fetch live inventory prices from Supabase on first load
+  useEffect(() => {
+    fetchInventory().then(inv => setInventory(inv))
+  }, [])
 
   // Fetch NASA satellite solar data whenever the location changes
   useEffect(() => {
@@ -60,7 +69,7 @@ export default function App() {
     const results = {}
     let anyValid = false
     tiers.forEach(tier => {
-      const r = runCalculation({ ...siteConfig, tier }, appliances, quantities)
+      const r = runCalculation({ ...siteConfig, tier }, appliances, quantities, inventory)
       results[tier] = r
       if (r) anyValid = true
     })
@@ -77,9 +86,11 @@ export default function App() {
     setQuantities(prev => ({ ...prev, [newApp.id]: 1 }))
   }
 
+  if (showAdmin) return <AdminInventory onBack={() => setShowAdmin(false)} />
+
   return (
     <div className="min-h-screen bg-gray-50">
-      <Navbar />
+      <Navbar onAdmin={() => setShowAdmin(true)} />
 
       {/* Progress bar — hidden on welcome screen */}
       {step > 0 && (
@@ -163,6 +174,7 @@ export default function App() {
           appliances={appliances}
           quantities={quantities}
           clientProfile={clientProfile}
+          inventory={inventory}
           onBack={() => setStep(2)} />
       )}
     </div>

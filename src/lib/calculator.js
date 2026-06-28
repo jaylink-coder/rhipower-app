@@ -1,7 +1,7 @@
 // RhiPower Engineering Calculator
 // Pure functions — no UI, no side effects. Input data in, results out.
 
-import { TIERS, ZONES } from '../data/skuInventory.js'
+import { TIERS as DEFAULT_TIERS, ZONES as DEFAULT_ZONES } from '../data/skuInventory.js'
 
 const PEAK_SUN_HOURS = {
   nanyuki: 5.5,
@@ -18,13 +18,15 @@ export function formatKsh(amount) {
   return 'Ksh ' + Math.round(amount).toLocaleString('en-KE')
 }
 
-export function runCalculation(siteConfig, allAppliances, quantities) {
+export function runCalculation(siteConfig, allAppliances, quantities, inventory = null) {
   const {
     location, wireDistM, siteKm,
     tier       = 'balanced',
-    backupDays = 1,            // ← how many days of storage the customer wants
+    backupDays = 1,
   } = siteConfig
 
+  const TIERS = inventory?.tiers || DEFAULT_TIERS
+  const ZONES = inventory?.zones || DEFAULT_ZONES
   const t = TIERS[tier]
   const z = ZONES
 

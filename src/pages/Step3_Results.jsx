@@ -196,7 +196,7 @@ const PROFILE_LABELS = {
 
 // ── Main Component ─────────────────────────────────────────────────────────
 export default function Step3_Results({
-  allResults, defaultTier, siteConfig, appliances, quantities, clientProfile, onBack
+  allResults, defaultTier, siteConfig, appliances, quantities, clientProfile, inventory, onBack
 }) {
   const isPro      = clientProfile === 'professional'
   const isDIY      = clientProfile === 'diy'
@@ -219,10 +219,10 @@ export default function Step3_Results({
   const liveAllResults = useMemo(() => {
     const out = {}
     ;['premium', 'balanced', 'budget'].forEach(tier => {
-      out[tier] = runCalculation({ ...siteConfig, tier, backupDays }, appliances, quantities)
+      out[tier] = runCalculation({ ...siteConfig, tier, backupDays }, appliances, quantities, inventory)
     })
     return out
-  }, [backupDays, siteConfig, appliances, quantities])
+  }, [backupDays, siteConfig, appliances, quantities, inventory])
 
   // Active tier result (already inside liveAllResults, just aliased for readability)
   const results = liveAllResults[activeTier]
