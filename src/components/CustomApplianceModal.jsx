@@ -1,4 +1,11 @@
 import { useState } from 'react'
+import { supabase, isSupabaseReady } from '../lib/supabase.js'
+
+function getSessionId() {
+  let id = sessionStorage.getItem('rp_sid')
+  if (!id) { id = crypto.randomUUID(); sessionStorage.setItem('rp_sid', id) }
+  return id
+}
 
 const SURGE_TYPES = [
   { value: 'resistive',        label: 'No — Resistive (Heaters, Lights, Electronics)' },
@@ -38,13 +45,14 @@ const INSIGHT_STYLES = {
 }
 
 export default function CustomApplianceModal({ onClose, onAdd }) {
-  const [name,  setName]  = useState('')
-  const [watts, setWatts] = useState('')
-  const [hp,    setHp]    = useState('')
-  const [amps,  setAmps]  = useState('')
-  const [type,  setType]  = useState('resistive')
-  const [phase, setPhase] = useState('single')
-  const [duty,  setDuty]  = useState(0.50)
+  const [name,      setName]      = useState('')
+  const [watts,     setWatts]     = useState('')
+  const [hp,        setHp]        = useState('')
+  const [amps,      setAmps]      = useState('')
+  const [type,      setType]      = useState('resistive')
+  const [phase,     setPhase]     = useState('single')
+  const [duty,      setDuty]      = useState(0.50)
+  const [submitted, setSubmitted] = useState(false)
 
   function syncFromWatts(w) {
     setWatts(w)
@@ -67,15 +75,36 @@ export default function CustomApplianceModal({ onClose, onAdd }) {
       alert('Please enter a name and power value.')
       return
     }
-    const surgeMap = { resistive: 1, 'inductive-standard': 3, 'inductive-heavy': 4.5 }
+    const surgeMap   = { resistive: 1, 'inductive-standard': 3, 'inductive-heavy': 4.5 }
+    const surgeFactor = surgeMap[type]
+    const appType     = type.includes('inductive') ? 'inductive' : 'resistive'
+
+    // Add to the live calculator immediately — no waiting
     onAdd({
       id:          'custom_' + Date.now(),
       name:        '⚙️ ' + name.trim(),
       watts:       w,
-      surgeFactor: surgeMap[type],
-      type:        type.includes('inductive') ? 'inductive' : 'resistive',
+      surgeFactor,
+      type:        appType,
     })
-    onClose()
+
+    // Fire-and-forget: log to Supabase for engineering review
+    if (isSupabaseReady) {
+      supabase.from('custom_appliance_suggestions').insert({
+        name:              name.trim(),
+        watts:             w,
+        surge_factor:      surgeFactor,
+        type:              appType,
+        phase_layout:      phase === 'three' ? 'three_phase' : 'single',
+        client_session_id: getSessionId(),
+      }).then(({ error }) => {
+        if (error) console.warn('[RhiPower] Appliance suggestion log failed:', error.message)
+      })
+    }
+
+    // Show confirmation briefly, then close
+    setSubmitted(true)
+    setTimeout(onClose, 1800)
   }
 
   return (
@@ -168,14 +197,26 @@ export default function CustomApplianceModal({ onClose, onAdd }) {
 
         {/* Footer */}
         <div className="bg-gray-50 p-4 border-t flex justify-end gap-3">
-          <button onClick={onClose}
-            className="px-5 py-2.5 border rounded-xl text-gray-600 hover:bg-gray-100 transition text-sm font-medium">
-            Cancel
-          </button>
-          <button onClick={handleInject}
-            className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-700 text-white rounded-xl shadow hover:opacity-95 transition text-sm font-bold">
-            Inject Into Load Calculator ⚡
-          </button>
+          {submitted ? (
+            <div className="flex-1 flex items-center gap-3 bg-green-50 border border-green-200 text-green-800 rounded-xl px-4 py-3 text-sm font-semibold">
+              <span className="text-xl">✅</span>
+              <div>
+                <div className="font-black">Added to your load list!</div>
+                <div className="text-xs font-normal text-green-600">Your custom appliance has been queued for engineering review.</div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <button onClick={onClose}
+                className="px-5 py-2.5 border rounded-xl text-gray-600 hover:bg-gray-100 transition text-sm font-medium">
+                Cancel
+              </button>
+              <button onClick={handleInject}
+                className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-700 text-white rounded-xl shadow hover:opacity-95 transition text-sm font-bold">
+                Inject Into Load Calculator ⚡
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
