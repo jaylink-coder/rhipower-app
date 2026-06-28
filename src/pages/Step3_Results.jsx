@@ -4,6 +4,7 @@ import { KENYA_LOCATIONS }    from '../lib/nasaPower.js'
 import { runCalculation, formatKsh } from '../lib/calculator.js'
 import { BUSINESS }           from '../config.js'
 import SystemDiagram          from '../components/SystemDiagram.jsx'
+import { supabase, isSupabaseReady } from '../lib/supabase.js'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 const TIER_STYLE = {
@@ -232,6 +233,40 @@ export default function Step3_Results({
           batteryQty, trueBattKWh, zoneA, zoneB, zoneC,
           fmt, heavyMotorCount, engineering: eng } = results
 
+  async function saveQuotation() {
+    if (!isSupabaseReady) return
+    try {
+      await supabase.from('quotation_requests').insert({
+        client_name:     name.trim(),
+        client_phone:    phone.trim(),
+        client_email:    email.trim()   || null,
+        site_address:    address.trim() || null,
+        client_profile:  clientProfile,
+        path_selected:   showPath,
+        location:        siteConfig.location,
+        profile:         siteConfig.profile,
+        tier_selected:   activeTier,
+        backup_days:     backupDays,
+        psh:             siteConfig.psh,
+        psh_source:      siteConfig.pshSource,
+        wire_dist_m:     siteConfig.wireDistM,
+        site_km:         siteConfig.siteKm,
+        panel_qty:       results.panelQty,
+        inverter_qty:    results.inverterQty,
+        battery_qty:     results.batteryQty,
+        true_pv_kw:      results.truePVkW,
+        total_inv_kw:    results.totalInverterKW,
+        true_batt_kwh:   results.trueBattKWh,
+        materials_kes:   results.materialsAtSellPrice,
+        labor_kes:       results.totalLabor,
+        logistics_kes:   results.totalLogistics,
+        grand_total_kes: results.grandTotal,
+      })
+    } catch (err) {
+      console.error('Supabase save failed (non-blocking):', err)
+    }
+  }
+
   function handleWhatsApp() {
     if (!name.trim() || !phone.trim()) {
       alert('Please enter your name and phone number so our engineer can contact you.')
@@ -239,6 +274,7 @@ export default function Step3_Results({
     }
     const msg = buildWhatsAppMessage(name, phone, siteConfig, results, activeTier, backupDays)
     window.open(`https://wa.me/${BUSINESS.whatsapp.replace(/\D/g, '')}?text=${msg}`, '_blank')
+    saveQuotation()   // fire-and-forget: saves to database without blocking the WhatsApp send
     setSubmitted(true)
   }
 
