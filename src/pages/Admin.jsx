@@ -579,8 +579,8 @@ function getTierBadge(category, price, priceBands) {
   return null
 }
 
-// ── Inventory table (headless — header is in the outer panel) ───────────────
-function InventoryTable({ session }) {
+// ── Inventory table (headless — header/sub-nav live in the outer panel's top bar) ──
+function InventoryTable({ session, invSection }) {
   const [rows,       setRows]       = useState({})
   const [priceBands, setPriceBands] = useState(defaultBandsAsRows)
   const [editing, setEditing] = useState({})
@@ -590,9 +590,6 @@ function InventoryTable({ session }) {
   const [addingTo, setAddingTo] = useState(null)  // which category's "+ Add Item" form is open
   const [cloneSource, setCloneSource] = useState(null)  // row being cloned into the Add Item form, if any
   const [viewingItem, setViewingItem] = useState(null)  // { row, category } for the detail modal
-  // Splits the growing inventory content into two focused sub-views instead
-  // of one long stacked scroll of six tables.
-  const [invSection, setInvSection] = useState('products')
 
   // Stock qty + reorder point + supplier (+ specs, for product categories) —
   // edited together as one small form, separate from price since touched far less often.
@@ -752,21 +749,6 @@ function InventoryTable({ session }) {
         <div><strong>To track stock:</strong> click "Not tracked" / the quantity under Stock Qty → enter units on hand,
         a reorder threshold, and your supplier. Leave blank if you don't want to track a particular item — it won't affect quoting either way.</div>
         <div><strong>Tier is now automatic:</strong> it's derived from where a product's buying price falls in the Price Bands panel below — add a second or third brand to any category and it'll slot into the right tier on its own.</div>
-      </div>
-
-      {/* Sub-navigation — Products (branded, price-banded, customer-facing
-          options) vs Components (shared BOM parts, same regardless of tier) */}
-      <div className="flex gap-1 bg-gray-100 rounded-2xl p-1 w-fit">
-        {[
-          { id: 'products',   label: '📦 Products',       count: productGroups.reduce((n, g) => n + g.items.length, 0) },
-          { id: 'components', label: '🔧 BOM Components', count: GROUPS.reduce((n, g) => n + g.items.length, 0) },
-        ].map(s => (
-          <button key={s.id} onClick={() => setInvSection(s.id)}
-            className={`px-4 py-2 rounded-xl text-sm font-bold transition
-              ${invSection === s.id ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>
-            {s.label} <span className="text-xs text-gray-400">({s.count})</span>
-          </button>
-        ))}
       </div>
 
       {invSection === 'products' && (
@@ -966,9 +948,22 @@ function InventoryTable({ session }) {
 }
 
 // ── Main admin panel — auth gate + tabs ─────────────────────────────────────
+const SECTIONS = [
+  { id: 'home',      label: '🏠 Command Centre' },
+  { id: 'leads',     label: '📋 Leads & Pipeline' },
+  { id: 'inventory', label: '📦 Inventory & Prices' },
+  { id: 'customers', label: '👥 Customers' },
+]
+
+const INVENTORY_SUBS = [
+  { id: 'products',   label: '📦 Products' },
+  { id: 'components', label: '🔧 BOM Components' },
+]
+
 export default function Admin({ onBack }) {
   const [session,     setSession]     = useState(undefined)
   const [activeTab,   setActiveTab]   = useState('home')
+  const [invSection,  setInvSection]  = useState('products')  // Inventory's sub-nav, shown in the top bar
   const [showWarning, setShowWarning] = useState(false)
 
   useEffect(() => {
@@ -997,7 +992,7 @@ export default function Admin({ onBack }) {
   if (!session) return <LoginScreen onBack={onBack} />
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 flex">
       {showWarning && (
         <SessionTimeoutModal
           minutesLeft={SESSION_WARN_MINUTES}
@@ -1005,41 +1000,54 @@ export default function Admin({ onBack }) {
           onSignOutNow={handleLogout}
         />
       )}
-      {/* Shared admin header */}
-      <div className="bg-gray-900 text-white px-6 py-4 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <div>
-            <h1 className="text-xl font-black">⚡ RhiPower Admin</h1>
-            <p className="text-xs text-gray-400 mt-0.5">{session.user?.email}</p>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={onBack} className="text-xs bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded-lg font-semibold transition">← App</button>
-            <button onClick={handleLogout} className="text-xs bg-red-800 hover:bg-red-700 px-3 py-2 rounded-lg font-semibold transition">Sign Out</button>
-          </div>
+
+      {/* Left sidebar — main sections */}
+      <aside className="w-56 shrink-0 bg-gray-900 text-white min-h-screen sticky top-0 flex flex-col">
+        <div className="px-5 py-5 border-b border-gray-800">
+          <h1 className="text-lg font-black">⚡ RhiPower</h1>
+          <p className="text-xs text-gray-400 mt-0.5 truncate">{session.user?.email}</p>
         </div>
-        {/* Tab bar */}
-        <div className="max-w-7xl mx-auto flex gap-1 mt-3">
-          {[
-            { id: 'home',      label: '🏠 Command Centre' },
-            { id: 'leads',     label: '📋 Leads & Pipeline' },
-            { id: 'inventory', label: '📦 Inventory & Prices' },
-            { id: 'customers', label: '👥 Customers' },
-          ].map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-              className={`text-sm font-bold px-4 py-2 rounded-lg transition
-                ${activeTab === tab.id ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white'}`}>
-              {tab.label}
+        <nav className="flex-1 px-3 py-4 space-y-1">
+          {SECTIONS.map(s => (
+            <button key={s.id} onClick={() => setActiveTab(s.id)}
+              className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-bold transition
+                ${activeTab === s.id ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}>
+              {s.label}
             </button>
           ))}
+        </nav>
+        <div className="px-3 py-4 border-t border-gray-800 space-y-1">
+          <button onClick={onBack} className="w-full text-left px-3 py-2 rounded-lg text-xs font-semibold text-gray-400 hover:text-white hover:bg-gray-800 transition">← Back to App</button>
+          <button onClick={handleLogout} className="w-full text-left px-3 py-2 rounded-lg text-xs font-semibold bg-red-900/40 text-red-300 hover:bg-red-900/70 transition">Sign Out</button>
         </div>
-      </div>
+      </aside>
 
-      {/* Tab content */}
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        {activeTab === 'home'      && <AdminHome session={session} onNavigate={setActiveTab} />}
-        {activeTab === 'leads'     && <AdminLeads session={session} />}
-        {activeTab === 'inventory' && <InventoryTable session={session} />}
-        {activeTab === 'customers' && <AdminCustomers session={session} />}
+      {/* Right side: top bar (sub-navigation for the active section) + content */}
+      <div className="flex-1 min-w-0">
+        <div className="bg-white border-b border-gray-100 px-6 py-3 sticky top-0 z-10">
+          {activeTab === 'inventory' ? (
+            <div className="flex gap-1 bg-gray-100 rounded-2xl p-1 w-fit">
+              {INVENTORY_SUBS.map(s => (
+                <button key={s.id} onClick={() => setInvSection(s.id)}
+                  className={`px-4 py-2 rounded-xl text-sm font-bold transition
+                    ${invSection === s.id ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <h2 className="text-lg font-black text-gray-800">
+              {SECTIONS.find(s => s.id === activeTab)?.label}
+            </h2>
+          )}
+        </div>
+
+        <div className="max-w-7xl px-4 py-6">
+          {activeTab === 'home'      && <AdminHome session={session} onNavigate={setActiveTab} />}
+          {activeTab === 'leads'     && <AdminLeads session={session} />}
+          {activeTab === 'inventory' && <InventoryTable session={session} invSection={invSection} />}
+          {activeTab === 'customers' && <AdminCustomers session={session} />}
+        </div>
       </div>
     </div>
   )
