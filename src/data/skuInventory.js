@@ -12,16 +12,16 @@ export const TIERS = {
   },
   balanced: {
     label: '✅ Balanced Tier',
-    description: 'Felicity & LONGi — professional-grade East African market leader. Best value for money.',
-    panel:    { sku: 'LR7-72HGD-620M',    description: 'LONGi Hi-MO 7 620W Bifacial Dual-Glass Panel',           cost: 18500, wattsEach: 620, unitWeightKg: 33.5 },
-    inverter: { sku: 'FL-INV-3P-20KW',    description: 'Felicity 20kW 3-Phase Industrial MPPT Inverter',         cost: 260000, kwEach: 20, unitWeightKg: 42  },
-    battery:  { sku: 'FL-BATT-48V-15KWH', description: 'Felicity 15kWh Premium Lithium LiFePO₄ Battery Pack',    cost: 315000, kwhEach: 15, unitWeightKg: 125 },
+    description: 'Deye & LONGi — the dominant best-value hybrid inverter brand in the Kenyan market.',
+    panel:    { sku: 'LR7-72HGD-620M',      description: 'LONGi Hi-MO 7 620W Bifacial Dual-Glass Panel',            cost: 18500, wattsEach: 620, unitWeightKg: 33.5 },
+    inverter: { sku: 'DEYE-SUN12K-SG04LP3', description: 'Deye SUN-12K-SG04LP3-EU 12kW 3-Phase 2-MPPT Hybrid Inverter', cost: 270000, kwEach: 12, unitWeightKg: 36 },
+    battery:  { sku: 'FL-BATT-48V-15KWH',   description: 'Felicity 15kWh Premium Lithium LiFePO₄ Battery Pack',      cost: 315000, kwhEach: 15, unitWeightKg: 125 },
   },
   budget: {
     label: '💡 Budget Tier',
-    description: 'Tier-1 panels + Must Energy inverter — cost-effective for smaller residential systems.',
-    panel:    { sku: 'GEN-MONO-550W',     description: 'Tier-1 550W Monocrystalline Solar Module',               cost: 14500, wattsEach: 550, unitWeightKg: 28  },
-    inverter: { sku: 'MUST-PH18-5KW',    description: 'Must Energy 5.2kW Hybrid Solar Inverter',                 cost: 85000, kwEach: 5.2, unitWeightKg: 12  },
+    description: 'Tier-1 panels + Growatt inverter — reliable, widely-serviced value pick for smaller systems.',
+    panel:    { sku: 'GEN-MONO-550W',    description: 'Tier-1 550W Monocrystalline Solar Module',               cost: 14500, wattsEach: 550, unitWeightKg: 28  },
+    inverter: { sku: 'GROWATT-SPF5000ES', description: 'Growatt SPF 5000 ES 5kW Hybrid Inverter',                cost: 83000, kwEach: 5, unitWeightKg: 12  },
     battery:  { sku: 'GEN-WALL-10KWH',   description: 'Market Standard 10.2kWh Lithium Battery Pack',            cost: 195000, kwhEach: 10.2, unitWeightKg: 85 },
   },
 }
@@ -35,6 +35,8 @@ export const ZONES = {
     { sku: 'DC-FUSE-15A',    description: 'Mersen 1000V DC Photovoltaic Fuse Holder + Link (15A)',          cost: 850  },
     { sku: 'CABLE-DC-6MM',   description: '6mm² Kinu Copper DC Solar Cable (Per Meter)',                    cost: 180  },
     { sku: 'CABLE-DC-10MM',  description: '10mm² Kinu Copper DC Solar Cable (Per Meter)',                   cost: 280  },
+    { sku: 'MOUNT-ALU-KIT',  description: 'Aluminium Roof Mounting Structure (rails, clamps, L-feet) — Per kWp', cost: 14000 },
+    { sku: 'EARTH-LA-KIT',   description: 'Earthing & Lightning Protection Kit (rods, arrestor, bonding cable)', cost: 22000 },
   ],
 
   // ─── ZONE B: BATTERY COMBINER STATION ───

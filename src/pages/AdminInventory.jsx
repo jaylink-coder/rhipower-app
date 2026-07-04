@@ -26,11 +26,13 @@ const GROUPS = [
     { key: 'budget_battery',   label: 'Budget — Generic 10.2 kWh',           spec: '10.2 kWh · 85 kg'  },
   ]},
   { title: '🔌 Zone A — Solar Array Protection', items: [
-    { key: 'zoneA_breaker', label: 'DC Isolator Breaker 63A',    spec: 'Chint NBI-63DC · per unit'    },
-    { key: 'zoneA_spd',     label: 'DC Surge Protection Device', spec: 'Chint NU6 Type 2 · per unit'  },
-    { key: 'zoneA_fuse',    label: 'PV Fuse Holder 15A',         spec: 'Mersen · per unit'            },
-    { key: 'zoneA_cable6',  label: '6mm² DC Solar Cable',        spec: 'Kinu Copper · per metre'      },
-    { key: 'zoneA_cable10', label: '10mm² DC Solar Cable',       spec: 'Kinu Copper · per metre'      },
+    { key: 'zoneA_breaker',  label: 'DC Isolator Breaker 63A',    spec: 'Chint NBI-63DC · per unit'    },
+    { key: 'zoneA_spd',      label: 'DC Surge Protection Device', spec: 'Chint NU6 Type 2 · per unit'  },
+    { key: 'zoneA_fuse',     label: 'PV Fuse Holder 15A',         spec: 'Mersen · per unit'            },
+    { key: 'zoneA_cable6',   label: '6mm² DC Solar Cable',        spec: 'Kinu Copper · per metre'      },
+    { key: 'zoneA_cable10',  label: '10mm² DC Solar Cable',       spec: 'Kinu Copper · per metre'      },
+    { key: 'zoneA_mounting', label: 'Roof Mounting Structure',    spec: 'Rails, clamps, L-feet · per kWp' },
+    { key: 'zoneA_earthing', label: 'Earthing & Lightning Kit',   spec: 'Rods, arrestor, bonding cable · per system' },
   ]},
   { title: '🔋 Zone B — Battery Bank Connections', items: [
     { key: 'zoneB_mccb',     label: 'Battery MCCB 400A',              spec: 'Chint NM8N · per unit'    },
@@ -103,6 +105,12 @@ function InventoryTable({ session }) {
   const [saved,   setSaved]   = useState({})
   const [loading, setLoading] = useState(true)
 
+  // Stock qty + reorder point + supplier — edited together as one small form,
+  // separate from the price-editing state above since they're touched far less often.
+  const [editingStock, setEditingStock] = useState({})
+  const [savingStock,  setSavingStock]  = useState({})
+  const [savedStock,   setSavedStock]   = useState({})
+
   useEffect(() => {
     supabase.from('inventory_prices').select('*').then(({ data }) => {
       if (data) { const m = {}; data.forEach(r => { m[r.role_key] = r }); setRows(m) }
@@ -141,13 +149,59 @@ function InventoryTable({ session }) {
     logAdminAction(session, 'stock_toggle', key, { in_stock: next })
   }
 
+  function startEditStock(key) {
+    const r = rows[key] || {}
+    setEditingStock(p => ({ ...p, [key]: {
+      stock_qty:     r.stock_qty     != null ? String(r.stock_qty)     : '',
+      reorder_point: r.reorder_point != null ? String(r.reorder_point) : '',
+      supplier:      r.supplier || '',
+    } }))
+  }
+  function cancelEditStock(key) {
+    setEditingStock(p => { const n = { ...p }; delete n[key]; return n })
+  }
+  function updateEditingStock(key, field, value) {
+    setEditingStock(p => ({ ...p, [key]: { ...p[key], [field]: value } }))
+  }
+  async function saveStock(key) {
+    const form = editingStock[key] || {}
+    const stock_qty     = form.stock_qty     === '' ? null : parseInt(form.stock_qty, 10)
+    const reorder_point = form.reorder_point === '' ? null : parseInt(form.reorder_point, 10)
+    const supplier       = form.supplier.trim() || null
+    setSavingStock(p => ({ ...p, [key]: true }))
+    const { error } = await supabase
+      .from('inventory_prices')
+      .update({ stock_qty, reorder_point, supplier, updated_at: new Date().toISOString() })
+      .eq('role_key', key)
+    setSavingStock(p => ({ ...p, [key]: false }))
+    if (!error) {
+      setRows(p => ({ ...p, [key]: { ...p[key], stock_qty, reorder_point, supplier } }))
+      cancelEditStock(key)
+      setSavedStock(p => ({ ...p, [key]: true }))
+      setTimeout(() => setSavedStock(p => { const n = { ...p }; delete n[key]; return n }), 2500)
+      logAdminAction(session, 'stock_level_update', key, { stock_qty, reorder_point, supplier })
+    }
+  }
+
   if (loading) return <div className="flex items-center justify-center py-20 text-gray-400">Loading inventory…</div>
+
+  const lowStockItems = GROUPS.flatMap(g => g.items)
+    .map(item => ({ item, row: rows[item.key] }))
+    .filter(({ row }) => row?.stock_qty != null && row?.reorder_point != null && row.stock_qty <= row.reorder_point)
 
   return (
     <div className="space-y-4">
-      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800">
-        <strong>To update a price:</strong> click the price → type new buying price → Save (or Enter).
-        Selling price = buying × 1.35 and updates automatically on all future client quotes.
+      {lowStockItems.length > 0 && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-800">
+          <strong>⚠️ {lowStockItems.length} item{lowStockItems.length !== 1 ? 's' : ''} at or below reorder point:</strong>{' '}
+          {lowStockItems.map(({ item, row }) => `${item.label} (${row.stock_qty} left)`).join(' · ')}
+        </div>
+      )}
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800 space-y-1">
+        <div><strong>To update a price:</strong> click the price → type new buying price → Save (or Enter).
+        Selling price = buying × 1.35 and updates automatically on all future client quotes.</div>
+        <div><strong>To track stock:</strong> click "Not tracked" / the quantity under Stock Qty → enter units on hand,
+        a reorder threshold, and your supplier. Leave blank if you don't want to track a particular item — it won't affect quoting either way.</div>
       </div>
 
       {GROUPS.map(group => (
@@ -163,6 +217,7 @@ function InventoryTable({ session }) {
                   <th className="px-4 py-2 text-right font-bold">Buying Price</th>
                   <th className="px-4 py-2 text-right font-bold">Selling Price</th>
                   <th className="px-4 py-2 text-center font-bold">In Stock</th>
+                  <th className="px-4 py-2 text-left font-bold">Stock Qty / Supplier</th>
                   <th className="px-4 py-2 text-left font-bold">Updated</th>
                   <th className="px-4 py-2 w-24"></th>
                 </tr>
@@ -204,6 +259,46 @@ function InventoryTable({ session }) {
                           className={`relative inline-flex w-10 h-6 rounded-full transition-colors ${inStock ? 'bg-green-500' : 'bg-gray-300'}`}>
                           <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${inStock ? 'translate-x-4' : 'translate-x-0'}`} />
                         </button>
+                      </td>
+                      <td className="px-4 py-3">
+                        {item.key in editingStock ? (
+                          <div className="flex flex-col gap-1 min-w-[180px]">
+                            <div className="flex gap-1 items-center">
+                              <input type="number" placeholder="Qty" value={editingStock[item.key].stock_qty}
+                                onChange={e => updateEditingStock(item.key, 'stock_qty', e.target.value)}
+                                className="w-16 border-2 border-blue-400 rounded-lg px-2 py-1 text-xs font-mono outline-none" />
+                              <span className="text-xs text-gray-400">reorder@</span>
+                              <input type="number" placeholder="—" value={editingStock[item.key].reorder_point}
+                                onChange={e => updateEditingStock(item.key, 'reorder_point', e.target.value)}
+                                className="w-14 border-2 border-blue-400 rounded-lg px-2 py-1 text-xs font-mono outline-none" />
+                            </div>
+                            <input type="text" placeholder="Supplier name" value={editingStock[item.key].supplier}
+                              onChange={e => updateEditingStock(item.key, 'supplier', e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') saveStock(item.key); if (e.key === 'Escape') cancelEditStock(item.key) }}
+                              className="border-2 border-blue-400 rounded-lg px-2 py-1 text-xs outline-none" />
+                            <div className="flex gap-1">
+                              <button onClick={() => saveStock(item.key)} disabled={savingStock[item.key]}
+                                className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-2 py-1 rounded-lg transition disabled:opacity-50">
+                                {savingStock[item.key] ? '…' : 'Save'}
+                              </button>
+                              <button onClick={() => cancelEditStock(item.key)} className="text-xs text-gray-400 hover:text-gray-600 px-1">✕</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button onClick={() => startEditStock(item.key)} className="text-left hover:bg-gray-50 rounded-lg px-1 -mx-1 py-0.5 transition">
+                            {row.stock_qty != null ? (
+                              <div className={`text-xs font-bold tabular-nums ${
+                                row.reorder_point != null && row.stock_qty <= row.reorder_point ? 'text-red-600' : 'text-gray-700'}`}>
+                                {row.stock_qty} unit{row.stock_qty !== 1 ? 's' : ''}
+                                {row.reorder_point != null && row.stock_qty <= row.reorder_point && ' ⚠️ Low'}
+                              </div>
+                            ) : (
+                              <div className="text-xs text-gray-300 italic">Not tracked</div>
+                            )}
+                            {row.supplier && <div className="text-xs text-gray-400">{row.supplier}</div>}
+                            {savedStock[item.key] && <div className="text-xs text-green-600 font-bold">✓ Saved</div>}
+                          </button>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-400">{updated}</td>
                       <td className="px-4 py-3">

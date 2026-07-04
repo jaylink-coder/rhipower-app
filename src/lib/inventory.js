@@ -63,11 +63,13 @@ export async function fetchInventory() {
       },
       zones: {
         zoneA: [
-          zoneItem('zoneA_breaker', DEFAULT_ZONES.zoneA[0]),
-          zoneItem('zoneA_spd',     DEFAULT_ZONES.zoneA[1]),
-          zoneItem('zoneA_fuse',    DEFAULT_ZONES.zoneA[2]),
-          zoneItem('zoneA_cable6',  DEFAULT_ZONES.zoneA[3]),
-          zoneItem('zoneA_cable10', DEFAULT_ZONES.zoneA[4]),
+          zoneItem('zoneA_breaker',  DEFAULT_ZONES.zoneA[0]),
+          zoneItem('zoneA_spd',      DEFAULT_ZONES.zoneA[1]),
+          zoneItem('zoneA_fuse',     DEFAULT_ZONES.zoneA[2]),
+          zoneItem('zoneA_cable6',   DEFAULT_ZONES.zoneA[3]),
+          zoneItem('zoneA_cable10',  DEFAULT_ZONES.zoneA[4]),
+          zoneItem('zoneA_mounting', DEFAULT_ZONES.zoneA[5]),
+          zoneItem('zoneA_earthing', DEFAULT_ZONES.zoneA[6]),
         ],
         zoneB: [
           zoneItem('zoneB_mccb',     DEFAULT_ZONES.zoneB[0]),

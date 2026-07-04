@@ -93,18 +93,27 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
   const qtySPD     = inverterQty * 2
   const qtyFuses   = Math.ceil(panelQty / 16) * 2
 
+  // Mounting scales with array size (Ksh/kWp); earthing/lightning protection is
+  // one code-mandated kit per system regardless of size.
+  const mountingCost = truePVkW * z.zoneA[5].cost
+  const earthingCost = z.zoneA[6].cost
+
   hardwareCostBase += panelQty    * t.panel.cost
   hardwareCostBase += qtyBreaker  * z.zoneA[0].cost
   hardwareCostBase += qtySPD      * z.zoneA[1].cost
   hardwareCostBase += qtyFuses    * z.zoneA[2].cost
   hardwareCostBase += cableMeters * cableSKU.cost
+  hardwareCostBase += mountingCost
+  hardwareCostBase += earthingCost
 
   const zoneA = [
-    { qty: panelQty,          label: t.panel.description,    sku: t.panel.sku },
-    { qty: qtyBreaker,        label: z.zoneA[0].description },
-    { qty: qtySPD,            label: z.zoneA[1].description },
-    { qty: qtyFuses,          label: z.zoneA[2].description },
-    { qty: `${cableMeters}m`, label: cableSpec },
+    { qty: panelQty,                     label: t.panel.description,    sku: t.panel.sku },
+    { qty: qtyBreaker,                   label: z.zoneA[0].description },
+    { qty: qtySPD,                       label: z.zoneA[1].description },
+    { qty: qtyFuses,                     label: z.zoneA[2].description },
+    { qty: `${cableMeters}m`,            label: cableSpec },
+    { qty: `${truePVkW.toFixed(1)} kWp`, label: z.zoneA[5].description, sku: z.zoneA[5].sku },
+    { qty: 1,                            label: z.zoneA[6].description, sku: z.zoneA[6].sku },
   ]
 
   // 8. ZONE B BOM (Battery Combiner)
