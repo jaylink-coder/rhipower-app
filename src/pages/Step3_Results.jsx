@@ -7,6 +7,8 @@ import SystemDiagram          from '../components/SystemDiagram.jsx'
 import { supabase, isSupabaseReady } from '../lib/supabase.js'
 import MpesaDeposit from '../components/MpesaDeposit.jsx'
 import { generateProposalPDF } from '../lib/pdfProposal.js'
+import { productSpecRows } from '../lib/productSpecs.js'
+import ProductDetail from '../components/ProductDetail.jsx'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 const TIER_STYLE = {
@@ -45,31 +47,7 @@ function BomZone({ title, color, intro, items }) {
   )
 }
 
-// Phone-comparison-style spec rows — only shows what's actually filled in
-// for a given product, since the admin may not have every spec on hand yet.
-function productSpecRows(category, p) {
-  const rows = []
-  if (category === 'panel') {
-    if (p.wattsEach)         rows.push(['Output', `${p.wattsEach}W`])
-    if (p.efficiencyPct)     rows.push(['Efficiency', `${p.efficiencyPct}%`])
-    if (p.warrantyYears)     rows.push(['Warranty', `${p.warrantyYears} yr`])
-    if (p.degradationPctYr)  rows.push(['Degradation', `${p.degradationPctYr}%/yr`])
-  } else if (category === 'inverter') {
-    if (p.kwEach)          rows.push(['Capacity', `${p.kwEach} kW`])
-    if (p.efficiencyPct)   rows.push(['Efficiency', `${p.efficiencyPct}%`])
-    if (p.mpptCount)       rows.push(['MPPT', `${p.mpptCount}`])
-    if (p.phase)           rows.push(['Phase', p.phase])
-    if (p.warrantyYears)   rows.push(['Warranty', `${p.warrantyYears} yr`])
-  } else if (category === 'battery') {
-    if (p.kwhEach)       rows.push(['Capacity', `${p.kwhEach} kWh`])
-    if (p.cycleLife)     rows.push(['Cycle life', `${p.cycleLife.toLocaleString()}`])
-    if (p.dodPct)        rows.push(['DoD', `${p.dodPct}%`])
-    if (p.warrantyYears) rows.push(['Warranty', `${p.warrantyYears} yr`])
-  }
-  return rows
-}
-
-function BrandPicker({ category, label, results, onPick }) {
+function BrandPicker({ category, label, results, onPick, onViewDetails }) {
   const options  = results.availableProducts[category]
   const selected = results.selectedProducts[category]
   if (!options || options.length <= 1) return null
@@ -82,21 +60,27 @@ function BrandPicker({ category, label, results, onPick }) {
           const isSel = opt.roleKey === selected.roleKey
           const specs = productSpecRows(category, opt)
           return (
-            <button key={opt.roleKey} onClick={() => onPick(category, opt)}
+            <div key={opt.roleKey}
               className={`text-left p-3 rounded-xl border-2 transition ${isSel ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="text-sm font-bold text-gray-800">{opt.description}</div>
-                {isSel && <span className="text-blue-600 text-xs font-bold shrink-0">✓ Selected</span>}
-              </div>
-              <div className="text-sm font-mono font-black text-gray-900 mt-1">{formatKsh(opt.cost)}</div>
-              {specs.length > 0 && (
-                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-2 text-xs text-gray-500">
-                  {specs.map(([k, v]) => (
-                    <div key={k}><span className="text-gray-400">{k}:</span> <span className="font-semibold text-gray-700">{v}</span></div>
-                  ))}
+              <button onClick={() => onPick(category, opt)} className="text-left w-full">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="text-sm font-bold text-gray-800">{opt.description}</div>
+                  {isSel && <span className="text-blue-600 text-xs font-bold shrink-0">✓ Selected</span>}
                 </div>
-              )}
-            </button>
+                <div className="text-sm font-mono font-black text-gray-900 mt-1">{formatKsh(opt.cost)}</div>
+                {specs.length > 0 && (
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-2 text-xs text-gray-500">
+                    {specs.map(([k, v]) => (
+                      <div key={k}><span className="text-gray-400">{k}:</span> <span className="font-semibold text-gray-700">{v}</span></div>
+                    ))}
+                  </div>
+                )}
+              </button>
+              <button onClick={() => onViewDetails(category, opt)}
+                className="text-xs text-blue-600 hover:text-blue-800 font-semibold mt-2">
+                View full details →
+              </button>
+            </div>
           )
         })}
       </div>
@@ -279,6 +263,8 @@ export default function Step3_Results({
   // Customer's explicit brand/model picks, kept per-tier so switching tiers
   // to compare and coming back doesn't lose what they chose.
   const [productOverrides, setProductOverrides] = useState({ premium: {}, balanced: {}, budget: {} })
+  // Full-page product detail view — { category, product } or null
+  const [viewingProduct, setViewingProduct] = useState(null)
 
   // Re-run ALL THREE tiers live whenever backup days or a brand pick changes
   const liveAllResults = useMemo(() => {
@@ -297,6 +283,19 @@ export default function Step3_Results({
   const results = liveAllResults[activeTier]
 
   if (!results) return null
+
+  if (viewingProduct) {
+    const isSelected = results.selectedProducts[viewingProduct.category]?.roleKey === viewingProduct.product.roleKey
+    return (
+      <ProductDetail
+        category={viewingProduct.category}
+        product={viewingProduct.product}
+        isSelected={isSelected}
+        onSelect={p => { handlePickProduct(viewingProduct.category, p); setViewingProduct(null) }}
+        onBack={() => setViewingProduct(null)}
+      />
+    )
+  }
 
   const { panelQty, truePVkW, inverterQty, totalInverterKW,
           batteryQty, trueBattKWh, zoneA, zoneB, zoneC,
@@ -430,9 +429,9 @@ export default function Step3_Results({
           <p className="text-xs font-bold uppercase text-gray-400 tracking-widest text-center">
             {TIER_META[activeTier]?.label} has more than one option — pick what fits you
           </p>
-          <BrandPicker category="panel"    label="☀️ Solar Panel"     results={results} onPick={handlePickProduct} />
-          <BrandPicker category="inverter" label="⚡ Inverter"        results={results} onPick={handlePickProduct} />
-          <BrandPicker category="battery"  label="🔋 Battery"         results={results} onPick={handlePickProduct} />
+          <BrandPicker category="panel"    label="☀️ Solar Panel" results={results} onPick={handlePickProduct} onViewDetails={(c, p) => setViewingProduct({ category: c, product: p })} />
+          <BrandPicker category="inverter" label="⚡ Inverter"     results={results} onPick={handlePickProduct} onViewDetails={(c, p) => setViewingProduct({ category: c, product: p })} />
+          <BrandPicker category="battery"  label="🔋 Battery"      results={results} onPick={handlePickProduct} onViewDetails={(c, p) => setViewingProduct({ category: c, product: p })} />
         </div>
       )}
 

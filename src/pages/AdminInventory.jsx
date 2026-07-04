@@ -271,6 +271,133 @@ function AddItemForm({ category, onAdded, session }) {
   )
 }
 
+// Stock movement ledger — fetched on demand per item, not preloaded for
+// every row, since it's a "why did this change" lookup, not a primary view.
+function StockHistoryToggle({ roleKey }) {
+  const [open,   setOpen]   = useState(false)
+  const [rows,   setRows]   = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  async function toggle() {
+    if (open) { setOpen(false); return }
+    setOpen(true)
+    if (rows === null) {
+      setLoading(true)
+      const { data } = await supabase.from('stock_movements')
+        .select('*').eq('role_key', roleKey).order('created_at', { ascending: false }).limit(20)
+      setRows(data || [])
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="mt-1">
+      <button onClick={toggle} className="text-xs text-gray-400 hover:text-blue-600 underline">
+        {open ? 'Hide history' : 'History'}
+      </button>
+      {open && (
+        <div className="mt-1 max-h-32 overflow-y-auto bg-gray-50 border border-gray-100 rounded-lg p-2 space-y-1 min-w-[200px]">
+          {loading ? (
+            <div className="text-xs text-gray-400">Loading…</div>
+          ) : rows.length === 0 ? (
+            <div className="text-xs text-gray-400 italic">No changes logged yet.</div>
+          ) : rows.map(r => (
+            <div key={r.id} className="text-xs">
+              <span className={r.quantity_changed >= 0 ? 'text-green-700 font-bold' : 'text-red-700 font-bold'}>
+                {r.quantity_changed >= 0 ? '+' : ''}{r.quantity_changed}
+              </span>{' '}
+              <span className="text-gray-500">{new Date(r.created_at).toLocaleDateString('en-KE', { day: '2-digit', month: 'short' })}</span>
+              {r.reason && <div className="text-gray-400 italic">{r.reason}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Serial-number tracking — inverters only (see migration 008 for why).
+function SerialsToggle({ roleKey, session }) {
+  const [open,   setOpen]   = useState(false)
+  const [serials, setSerials] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [newSerial, setNewSerial] = useState('')
+  const [adding, setAdding] = useState(false)
+
+  async function load() {
+    setLoading(true)
+    const { data } = await supabase.from('product_serials')
+      .select('*').eq('role_key', roleKey).order('created_at', { ascending: false })
+    setSerials(data || [])
+    setLoading(false)
+  }
+
+  async function toggle() {
+    if (open) { setOpen(false); return }
+    setOpen(true)
+    if (serials === null) await load()
+  }
+
+  async function addSerial() {
+    if (!newSerial.trim()) return
+    setAdding(true)
+    const { error } = await supabase.from('product_serials').insert({ role_key: roleKey, serial_number: newSerial.trim() })
+    setAdding(false)
+    if (!error) {
+      setNewSerial('')
+      await load()
+      logAdminAction(session, 'serial_added', roleKey, { serial_number: newSerial.trim() })
+    }
+  }
+
+  async function updateStatus(id, status) {
+    await supabase.from('product_serials').update({ status }).eq('id', id)
+    setSerials(p => p.map(s => s.id === id ? { ...s, status } : s))
+    logAdminAction(session, 'serial_status_update', roleKey, { id, status })
+  }
+
+  return (
+    <div className="mt-1">
+      <button onClick={toggle} className="text-xs text-gray-400 hover:text-blue-600 underline">
+        {open ? 'Hide serials' : `Serials${serials ? ` (${serials.length})` : ''}`}
+      </button>
+      {open && (
+        <div className="mt-1 bg-gray-50 border border-gray-100 rounded-lg p-2 space-y-1.5 min-w-[220px] max-h-48 overflow-y-auto">
+          {loading ? (
+            <div className="text-xs text-gray-400">Loading…</div>
+          ) : (
+            <>
+              {serials.length === 0 && <div className="text-xs text-gray-400 italic">No serials tracked yet.</div>}
+              {serials.map(s => (
+                <div key={s.id} className="text-xs flex items-center justify-between gap-1">
+                  <span className="font-mono text-gray-700">{s.serial_number}</span>
+                  <select value={s.status} onChange={e => updateStatus(s.id, e.target.value)}
+                    className="text-xs border border-gray-200 rounded px-1 py-0.5 bg-white">
+                    <option value="available">Available</option>
+                    <option value="reserved">Reserved</option>
+                    <option value="installed">Installed</option>
+                    <option value="defective">Defective</option>
+                  </select>
+                </div>
+              ))}
+              <div className="flex gap-1 pt-1">
+                <input type="text" placeholder="Serial number" value={newSerial}
+                  onChange={e => setNewSerial(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') addSerial() }}
+                  className="flex-1 border border-gray-200 rounded px-1.5 py-1 text-xs" />
+                <button onClick={addSerial} disabled={adding}
+                  className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-2 py-1 rounded disabled:opacity-50">
+                  {adding ? '…' : 'Add'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // AdminInventory keeps price bands in the same shape the DB rows already
 // have ({min_price, max_price}) rather than the [min,max] tuples used
 // elsewhere, since that's what's directly rendered/edited here.
@@ -369,6 +496,7 @@ function InventoryTable({ session }) {
       stock_qty:     r.stock_qty     != null ? String(r.stock_qty)     : '',
       reorder_point: r.reorder_point != null ? String(r.reorder_point) : '',
       supplier:      r.supplier || '',
+      reason:        '',
     }
     // Product categories (panel/inverter/battery) also expose capacity,
     // weight, and comparison specs in this same combined form.
@@ -407,11 +535,22 @@ function InventoryTable({ session }) {
     const { error } = await supabase.from('inventory_prices').update(payload).eq('role_key', key)
     setSavingStock(p => ({ ...p, [key]: false }))
     if (!error) {
+      const previousQty = row.stock_qty
       setRows(p => ({ ...p, [key]: { ...p[key], ...payload } }))
       cancelEditStock(key)
       setSavedStock(p => ({ ...p, [key]: true }))
       setTimeout(() => setSavedStock(p => { const n = { ...p }; delete n[key]; return n }), 2500)
       logAdminAction(session, 'stock_level_update', key, payload)
+
+      // Log a ledger entry whenever the quantity actually changed
+      const delta = payload.stock_qty != null ? payload.stock_qty - (previousQty || 0) : 0
+      if (delta !== 0) {
+        await supabase.from('stock_movements').insert({
+          role_key: key, quantity_changed: delta,
+          reason: form.reason?.trim() || null,
+          admin_id: session?.user?.id || null, admin_email: session?.user?.email || null,
+        })
+      }
     }
   }
 
@@ -554,6 +693,9 @@ function InventoryTable({ session }) {
                             )}
                             <input type="text" placeholder="Supplier name" value={editingStock[item.key].supplier}
                               onChange={e => updateEditingStock(item.key, 'supplier', e.target.value)}
+                              className="border-2 border-blue-400 rounded-lg px-2 py-1 text-xs outline-none" />
+                            <input type="text" placeholder="Reason for qty change (optional)" value={editingStock[item.key].reason}
+                              onChange={e => updateEditingStock(item.key, 'reason', e.target.value)}
                               onKeyDown={e => { if (e.key === 'Enter') saveStock(item.key); if (e.key === 'Escape') cancelEditStock(item.key) }}
                               className="border-2 border-blue-400 rounded-lg px-2 py-1 text-xs outline-none" />
                             <div className="flex gap-1">
@@ -579,6 +721,8 @@ function InventoryTable({ session }) {
                             {savedStock[item.key] && <div className="text-xs text-green-600 font-bold">✓ Saved</div>}
                           </button>
                         )}
+                        {row.stock_qty != null && <StockHistoryToggle roleKey={item.key} />}
+                        {group.category === 'inverter' && <SerialsToggle roleKey={item.key} session={session} />}
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-400">{updated}</td>
                       <td className="px-4 py-3">

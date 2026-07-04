@@ -24,6 +24,7 @@ function toProduct(row) {
     phase:            row.phase        || undefined,
     cycleLife:        row.cycle_life   != null ? Number(row.cycle_life) : undefined,
     dodPct:           row.dod_pct      != null ? Number(row.dod_pct)    : undefined,
+    imageUrl:         row.image_url || undefined,
     inStock:          row.in_stock !== false,
   }
 }
