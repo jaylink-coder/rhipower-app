@@ -15,6 +15,79 @@ const STATUS_STYLES = {
 
 function todayISO() { return new Date().toISOString().slice(0, 10) }
 
+const PHOTO_BUCKET = 'site-visit-photos'
+
+function VisitPhotos({ visitId, session }) {
+  const [photos,    setPhotos]    = useState([])
+  const [loading,   setLoading]   = useState(true)
+  const [uploading, setUploading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      const { data } = await supabase.from('site_visit_photos')
+        .select('*').eq('visit_id', visitId).order('created_at', { ascending: true })
+      const withUrls = await Promise.all((data || []).map(async p => {
+        const { data: signed } = await supabase.storage.from(PHOTO_BUCKET)
+          .createSignedUrl(p.storage_path, 3600)
+        return { ...p, url: signed?.signedUrl }
+      }))
+      if (!cancelled) { setPhotos(withUrls); setLoading(false) }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [visitId])
+
+  async function handleUpload(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setUploading(true)
+    const ext  = file.name.split('.').pop() || 'jpg'
+    const path = `${visitId}/${Date.now()}.${ext}`
+    const { error: upErr } = await supabase.storage.from(PHOTO_BUCKET).upload(path, file)
+    if (upErr) { console.error('[RhiPower] photo upload failed:', upErr.message); setUploading(false); return }
+
+    const { data } = await supabase.from('site_visit_photos').insert({
+      visit_id: visitId, storage_path: path, uploaded_by: session?.user?.id || null,
+    }).select().single()
+    if (data) {
+      const { data: signed } = await supabase.storage.from(PHOTO_BUCKET).createSignedUrl(path, 3600)
+      setPhotos(p => [...p, { ...data, url: signed?.signedUrl }])
+      logAdminAction(session, 'site_visit_photo_uploaded', visitId, null)
+    }
+    setUploading(false)
+  }
+
+  async function handleDelete(photo) {
+    setPhotos(p => p.filter(x => x.id !== photo.id))
+    await supabase.storage.from(PHOTO_BUCKET).remove([photo.storage_path])
+    await supabase.from('site_visit_photos').delete().eq('id', photo.id)
+  }
+
+  if (loading) return <div className="text-[10px] text-gray-300 mt-1">Loading photos…</div>
+
+  return (
+    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+      {photos.map(p => (
+        <div key={p.id} className="relative group shrink-0">
+          <a href={p.url} target="_blank" rel="noreferrer">
+            <img src={p.url} alt="Site visit" className="w-12 h-12 object-cover rounded-lg border border-gray-200" />
+          </a>
+          <button onClick={() => handleDelete(p)}
+            className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-4 h-4 text-[9px] leading-4 opacity-0 group-hover:opacity-100 transition">
+            ✕
+          </button>
+        </div>
+      ))}
+      <label className="w-12 h-12 shrink-0 flex items-center justify-center rounded-lg border-2 border-dashed border-gray-300 text-gray-400 cursor-pointer hover:border-blue-400 hover:text-blue-500 text-[10px] font-bold transition">
+        {uploading ? '…' : '📷+'}
+        <input type="file" accept="image/*" className="hidden" onChange={handleUpload} disabled={uploading} />
+      </label>
+    </div>
+  )
+}
+
 export default function SiteVisitsPanel({ quotationId, session, leadStatus, onLeadStatusChange }) {
   const [visits,   setVisits]   = useState([])
   const [loading,  setLoading]  = useState(true)
@@ -135,6 +208,7 @@ export default function SiteVisitsPanel({ quotationId, session, leadStatus, onLe
                   {v.assigned_to && ` · ${v.assigned_to}`}
                 </div>
                 {v.notes && <div className="text-gray-500 mt-0.5 italic">{v.notes}</div>}
+                <VisitPhotos visitId={v.id} session={session} />
               </div>
               {v.status === 'scheduled' && (
                 <div className="flex gap-1 shrink-0">

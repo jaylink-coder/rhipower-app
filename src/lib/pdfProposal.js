@@ -20,7 +20,7 @@ function money(n) {
 // text stays clean.
 function tierName(tier) {
   const label = TIERS[tier]?.label || tier
-  return label.replace(/[^\x00-\x7F]/g, '').trim()
+  return label.replace(/[^\x20-\x7E]/g, '').trim()
 }
 
 function addFooter(doc, pageNum, pageCount) {
