@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { formatKsh } from '../lib/calculator.js'
+import { logAdminAction } from '../lib/auditLog.js'
+import SiteVisitsPanel from '../components/SiteVisitsPanel.jsx'
 
 const STATUS_OPTIONS = [
   { value: 'new',               label: 'New',               color: 'bg-blue-100   text-blue-800'   },
@@ -15,8 +17,9 @@ const TIER_LABELS = { premium: '⭐ Premium', balanced: '✅ Balanced', budget: 
 const PATH_LABELS = { buy: '🛒 Supply Only', diy: '🔧 DIY', book: '👷 Full Turnkey' }
 const PROF_LABELS = { homeowner: '🏠 Homeowner', diy: '🔌 DIY', professional: '⚡ Engineer', business: '🏢 Business' }
 
-export default function AdminLeads() {
+export default function AdminLeads({ session }) {
   const [leads,         setLeads]         = useState([])
+  const [deposits,      setDeposits]      = useState({})   // quotation_id -> deposit_transactions row
   const [loading,       setLoading]       = useState(true)
   const [filter,        setFilter]        = useState('all')
   const [expanded,      setExpanded]      = useState(null)
@@ -28,15 +31,22 @@ export default function AdminLeads() {
 
   async function loadLeads() {
     setLoading(true)
-    const { data } = await supabase
-      .from('quotation_requests')
-      .select('*')
-      .order('created_at', { ascending: false })
+    const [{ data }, { data: depositRows }] = await Promise.all([
+      supabase.from('quotation_requests').select('*').order('created_at', { ascending: false }),
+      supabase.from('deposit_transactions').select('quotation_id, amount_kes, status, mpesa_receipt')
+        .not('quotation_id', 'is', null),
+    ])
     if (data) {
       setLeads(data)
       const n = {}
       data.forEach(l => { n[l.id] = l.admin_notes || '' })
       setNotes(n)
+    }
+    if (depositRows) {
+      const d = {}
+      // Last write wins per quotation — fine since retries just overwrite with the latest status
+      depositRows.forEach(r => { d[r.quotation_id] = r })
+      setDeposits(d)
     }
     setLoading(false)
   }
@@ -46,6 +56,7 @@ export default function AdminLeads() {
     await supabase.from('quotation_requests').update({ status }).eq('id', id)
     setLeads(p => p.map(l => l.id === id ? { ...l, status } : l))
     setSavingStatus(p => ({ ...p, [id]: false }))
+    logAdminAction(session, 'lead_status_change', id, { status })
   }
 
   async function saveNote(id) {
@@ -187,6 +198,30 @@ export default function AdminLeads() {
                     <span className="text-emerald-400 font-black text-lg">{formatKsh(lead.grand_total_kes||0)}</span>
                   </div>
                 </div>
+
+                {/* Deposit status */}
+                {deposits[lead.id] && (
+                  <div className={`rounded-xl p-3 text-xs font-semibold flex items-center justify-between
+                    ${deposits[lead.id].status === 'completed' ? 'bg-green-50 text-green-800 border border-green-200'
+                      : deposits[lead.id].status === 'failed'   ? 'bg-red-50 text-red-800 border border-red-200'
+                      : 'bg-amber-50 text-amber-800 border border-amber-200'}`}>
+                    <span>
+                      {deposits[lead.id].status === 'completed' ? '💰 Deposit paid'
+                        : deposits[lead.id].status === 'failed'   ? '⚠️ Deposit attempt failed'
+                        : deposits[lead.id].status === 'needs_review' ? '🔎 Deposit needs manual review'
+                        : '⏳ Deposit pending'}
+                      {' — '}{formatKsh(deposits[lead.id].amount_kes)}
+                    </span>
+                    {deposits[lead.id].mpesa_receipt && <span className="font-mono">{deposits[lead.id].mpesa_receipt}</span>}
+                  </div>
+                )}
+
+                <SiteVisitsPanel
+                  quotationId={lead.id}
+                  session={session}
+                  leadStatus={lead.status || 'new'}
+                  onLeadStatusChange={newStatus => setLeads(p => p.map(l => l.id === lead.id ? { ...l, status: newStatus } : l))}
+                />
 
                 {/* Status + notes */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

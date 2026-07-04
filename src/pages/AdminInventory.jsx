@@ -2,6 +2,11 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { formatKsh } from '../lib/calculator.js'
 import AdminLeads from './AdminLeads.jsx'
+import AdminCustomers from './AdminCustomers.jsx'
+import SessionTimeoutModal from '../components/SessionTimeoutModal.jsx'
+import { useSessionTimeout } from '../hooks/useSessionTimeout.js'
+import { SESSION_TIMEOUT_MINUTES, SESSION_WARN_MINUTES } from '../lib/roles.js'
+import { logAdminAction } from '../lib/auditLog.js'
 
 // ── Inventory groups ────────────────────────────────────────────────────────
 const GROUPS = [
@@ -91,7 +96,7 @@ function LoginScreen({ onBack }) {
 }
 
 // ── Inventory table (headless — header is in the outer panel) ───────────────
-function InventoryTable() {
+function InventoryTable({ session }) {
   const [rows,    setRows]    = useState({})
   const [editing, setEditing] = useState({})
   const [saving,  setSaving]  = useState({})
@@ -121,16 +126,19 @@ function InventoryTable() {
       .eq('role_key', key)
     setSaving(p => ({ ...p, [key]: false }))
     if (!error) {
+      const previous = rows[key]?.buying_price_kes
       setRows(p => ({ ...p, [key]: { ...p[key], buying_price_kes: price, updated_at: new Date().toISOString() } }))
       cancelEdit(key)
       setSaved(p => ({ ...p, [key]: true }))
       setTimeout(() => setSaved(p => { const n={...p}; delete n[key]; return n }), 2500)
+      logAdminAction(session, 'price_update', key, { from: previous, to: price })
     }
   }
   async function toggleStock(key) {
     const next = !(rows[key]?.in_stock ?? true)
     await supabase.from('inventory_prices').update({ in_stock: next, updated_at: new Date().toISOString() }).eq('role_key', key)
     setRows(p => ({ ...p, [key]: { ...p[key], in_stock: next } }))
+    logAdminAction(session, 'stock_toggle', key, { in_stock: next })
   }
 
   if (loading) return <div className="flex items-center justify-center py-20 text-gray-400">Loading inventory…</div>
@@ -227,8 +235,9 @@ function InventoryTable() {
 
 // ── Main admin panel — auth gate + tabs ─────────────────────────────────────
 export default function AdminInventory({ onBack }) {
-  const [session,   setSession]   = useState(undefined)
-  const [activeTab, setActiveTab] = useState('leads')
+  const [session,     setSession]     = useState(undefined)
+  const [activeTab,   setActiveTab]   = useState('leads')
+  const [showWarning, setShowWarning] = useState(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session))
@@ -241,6 +250,15 @@ export default function AdminInventory({ onBack }) {
     setSession(null)
   }
 
+  // Auto sign-out an idle admin — this session controls live pricing and every
+  // customer lead, so it doesn't get to stay open indefinitely like a browsing visitor's.
+  const { staySignedIn } = useSessionTimeout({
+    timeoutMinutes: SESSION_TIMEOUT_MINUTES.admin,
+    enabled:        Boolean(session),
+    onWarn:         () => setShowWarning(true),
+    onTimeout:      () => { setShowWarning(false); handleLogout() },
+  })
+
   if (session === undefined) return (
     <div className="min-h-screen flex items-center justify-center text-gray-400">Checking session…</div>
   )
@@ -248,6 +266,13 @@ export default function AdminInventory({ onBack }) {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {showWarning && (
+        <SessionTimeoutModal
+          minutesLeft={SESSION_WARN_MINUTES}
+          onStay={() => { staySignedIn(); setShowWarning(false) }}
+          onSignOutNow={handleLogout}
+        />
+      )}
       {/* Shared admin header */}
       <div className="bg-gray-900 text-white px-6 py-4 sticky top-0 z-10">
         <div className="max-w-5xl mx-auto flex justify-between items-center">
@@ -265,6 +290,7 @@ export default function AdminInventory({ onBack }) {
           {[
             { id: 'leads',     label: '📋 Leads & Pipeline' },
             { id: 'inventory', label: '📦 Inventory & Prices' },
+            { id: 'customers', label: '👥 Customers' },
           ].map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)}
               className={`text-sm font-bold px-4 py-2 rounded-lg transition
@@ -277,8 +303,9 @@ export default function AdminInventory({ onBack }) {
 
       {/* Tab content */}
       <div className="max-w-5xl mx-auto px-4 py-6">
-        {activeTab === 'leads'     && <AdminLeads />}
-        {activeTab === 'inventory' && <InventoryTable />}
+        {activeTab === 'leads'     && <AdminLeads session={session} />}
+        {activeTab === 'inventory' && <InventoryTable session={session} />}
+        {activeTab === 'customers' && <AdminCustomers session={session} />}
       </div>
     </div>
   )

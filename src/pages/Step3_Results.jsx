@@ -5,6 +5,7 @@ import { runCalculation, formatKsh } from '../lib/calculator.js'
 import { BUSINESS }           from '../config.js'
 import SystemDiagram          from '../components/SystemDiagram.jsx'
 import { supabase, isSupabaseReady } from '../lib/supabase.js'
+import MpesaDeposit from '../components/MpesaDeposit.jsx'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 const TIER_STYLE = {
@@ -196,7 +197,7 @@ const PROFILE_LABELS = {
 
 // ── Main Component ─────────────────────────────────────────────────────────
 export default function Step3_Results({
-  allResults, defaultTier, siteConfig, appliances, quantities, clientProfile, inventory, onBack
+  allResults, defaultTier, siteConfig, appliances, quantities, clientProfile, inventory, customerUser, onBack
 }) {
   const isPro      = clientProfile === 'professional'
   const isDIY      = clientProfile === 'diy'
@@ -214,6 +215,7 @@ export default function Step3_Results({
   const [email,      setEmail]      = useState('')
   const [address,    setAddress]    = useState('')
   const [submitted,  setSubmitted]  = useState(false)
+  const [quotationId, setQuotationId] = useState(null)
 
   // Re-run ALL THREE tiers live whenever backup days changes — keeps comparison cards in sync
   const liveAllResults = useMemo(() => {
@@ -236,7 +238,10 @@ export default function Step3_Results({
   async function saveQuotation() {
     if (!isSupabaseReady) return
     try {
-      await supabase.from('quotation_requests').insert({
+      // Only the client's own additions need saving — DEFAULT_APPLIANCES is
+      // reconstructed from code on resume, keeping this snapshot small.
+      const customAppliances = appliances.filter(a => a.id.startsWith('custom_'))
+      const { data } = await supabase.from('quotation_requests').insert({
         client_name:     name.trim(),
         client_phone:    phone.trim(),
         client_email:    email.trim()   || null,
@@ -261,7 +266,10 @@ export default function Step3_Results({
         labor_kes:       results.totalLabor,
         logistics_kes:   results.totalLogistics,
         grand_total_kes: results.grandTotal,
-      })
+        user_id:         customerUser?.id || null,
+        raw_state:       { siteConfig, customAppliances, quantities, clientProfile, backupDays },
+      }).select('id').single()
+      if (data?.id) setQuotationId(data.id)
     } catch (err) {
       console.error('Supabase save failed (non-blocking):', err)
     }
@@ -437,6 +445,21 @@ export default function Step3_Results({
             Every item is required for a safe, IEC-compliant installation.
             SKU codes allow you or your electrician to source and verify independently.
           </p>
+
+          <div className="bg-emerald-50 border-2 border-emerald-200 rounded-2xl p-4">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl shrink-0">🛡️</span>
+              <div className="text-sm text-emerald-900">
+                <p className="font-black mb-1">Why source this list from RhiPower instead of piecing it together yourself?</p>
+                <ul className="text-xs space-y-1 text-emerald-800">
+                  <li>✅ <strong>Genuine stock, not relabeled or grey-market</strong> — every panel/inverter/battery SKU above is traceable to its manufacturer, unlike unverifiable marketplace listings.</li>
+                  <li>✅ <strong>Full manufacturer warranty</strong> — 25-year panels, 10-year inverter, 10-year battery — void or unenforceable on gear bought piecemeal with no invoice trail.</li>
+                  <li>✅ <strong>Engineering liability</strong> — this BOM is sized as one matched system. Mixing brands/specs sourced separately risks inverter-battery incompatibility with no one accountable if it fails.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
           <BomZone
             title="📦 Zone A — Solar Array & Combiner Box (rooftop)"
             color="orange"
@@ -569,6 +592,15 @@ export default function Step3_Results({
                 <span className="text-xs text-blue-500 ml-2">incl. VAT, excl. installation</span>
               </p>
               <ContactForm {...contactProps} ctaLabel="Request Supply Quote via WhatsApp" />
+              {submitted && (
+                <div className="mt-4">
+                  <MpesaDeposit
+                    quotationId={quotationId}
+                    defaultPhone={phone}
+                    suggestedAmount={Math.max(5000, Math.round(results.grandTotal * 0.05 / 100) * 100)}
+                  />
+                </div>
+              )}
             </div>
           )}
 
@@ -628,6 +660,15 @@ export default function Step3_Results({
                 Full turnkey estimate: <strong className="text-xl font-black">{fmt.total}</strong>
               </div>
               <ContactForm {...contactProps} ctaLabel="Book Site Survey via WhatsApp" />
+              {submitted && (
+                <div className="mt-4">
+                  <MpesaDeposit
+                    quotationId={quotationId}
+                    defaultPhone={phone}
+                    suggestedAmount={Math.max(5000, Math.round(results.grandTotal * 0.05 / 100) * 100)}
+                  />
+                </div>
+              )}
             </div>
           )}
 

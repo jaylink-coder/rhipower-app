@@ -5,10 +5,13 @@ import Step1_SiteConfig from './pages/Step1_SiteConfig.jsx'
 import Step2_Loads      from './pages/Step2_Loads.jsx'
 import Step3_Results    from './pages/Step3_Results.jsx'
 import AdminInventory   from './pages/AdminInventory.jsx'
+import CustomerAuth     from './components/CustomerAuth.jsx'
+import MyQuotes         from './pages/MyQuotes.jsx'
 import { DEFAULT_APPLIANCES } from './data/appliances.js'
 import { fetchSolarData }     from './lib/nasaPower.js'
 import { runCalculation }     from './lib/calculator.js'
 import { fetchInventory }     from './lib/inventory.js'
+import { supabase, isSupabaseReady } from './lib/supabase.js'
 import './App.css'
 
 const STEP_LABELS = ['Site & Intent', 'Electrical Loads', 'Results & Quote']
@@ -34,10 +37,21 @@ export default function App() {
   const [nasaLoading,   setNasaLoading]   = useState(false)
   const [inventory,     setInventory]     = useState(null)   // null = use hardcoded fallback
   const [showAdmin,     setShowAdmin]     = useState(false)
+  const [showAccount,   setShowAccount]   = useState(false)
+  const [customerUser,  setCustomerUser]  = useState(null)   // null = signed out
 
   // Fetch live inventory prices from Supabase on first load
   useEffect(() => {
     fetchInventory().then(inv => setInventory(inv))
+  }, [])
+
+  // Track the signed-in customer session (shared Supabase Auth client — if the
+  // logged-in user is you, the admin, this just reflects that same session here too)
+  useEffect(() => {
+    if (!isSupabaseReady) return
+    supabase.auth.getSession().then(({ data: { session } }) => setCustomerUser(session?.user ?? null))
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, s) => setCustomerUser(s?.user ?? null))
+    return () => subscription.unsubscribe()
   }, [])
 
   // Fetch NASA satellite solar data whenever the location changes
@@ -86,11 +100,39 @@ export default function App() {
     setQuantities(prev => ({ ...prev, [newApp.id]: 1 }))
   }
 
+  // Reopen a saved design from "My Quotes" — rebuild state directly from the
+  // snapshot rather than relying on setState timing, then jump straight to results.
+  function handleResumeQuote(raw) {
+    const restoredAppliances = [...DEFAULT_APPLIANCES, ...(raw.customAppliances || [])]
+    const results = {}
+    let anyValid = false
+    ;['premium', 'balanced', 'budget'].forEach(tier => {
+      const r = runCalculation({ ...raw.siteConfig, tier }, restoredAppliances, raw.quantities, inventory)
+      results[tier] = r
+      if (r) anyValid = true
+    })
+    if (!anyValid) return
+
+    setClientProfile(raw.clientProfile || null)
+    setSiteConfig(raw.siteConfig)
+    setAppliances(restoredAppliances)
+    setQuantities(raw.quantities)
+    setAllResults(results)
+    setShowAccount(false)
+    setStep(3)
+  }
+
   if (showAdmin) return <AdminInventory onBack={() => setShowAdmin(false)} />
+
+  if (showAccount) {
+    return customerUser
+      ? <MyQuotes user={customerUser} onBack={() => setShowAccount(false)} onResume={handleResumeQuote} />
+      : <CustomerAuth onBack={() => setShowAccount(false)} onSignedIn={() => {}} />
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Navbar onAdmin={() => setShowAdmin(true)} />
+      <Navbar onAdmin={() => setShowAdmin(true)} onAccount={() => setShowAccount(true)} customerUser={customerUser} />
 
       {/* Progress bar — hidden on welcome screen */}
       {step > 0 && (
@@ -175,6 +217,7 @@ export default function App() {
           quantities={quantities}
           clientProfile={clientProfile}
           inventory={inventory}
+          customerUser={customerUser}
           onBack={() => setStep(2)} />
       )}
     </div>
