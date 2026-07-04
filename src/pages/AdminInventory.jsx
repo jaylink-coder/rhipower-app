@@ -17,8 +17,8 @@ const GROUPS = [
   ]},
   { title: '⚡ Inverters', items: [
     { key: 'premium_inverter',  label: 'Premium — Victron Quattro 15kVA',    spec: '15 kW · 45 kg'  },
-    { key: 'balanced_inverter', label: 'Balanced — Felicity 20kW 3-Phase',   spec: '20 kW · 42 kg'  },
-    { key: 'budget_inverter',   label: 'Budget — Must Energy 5.2kW',         spec: '5.2 kW · 12 kg' },
+    { key: 'balanced_inverter', label: 'Balanced — Deye SUN-12K 3-Phase',    spec: '12 kW · 36 kg'  },
+    { key: 'budget_inverter',   label: 'Budget — Growatt SPF 5000 ES',       spec: '5 kW · 12 kg'   },
   ]},
   { title: '🔋 Batteries', items: [
     { key: 'premium_battery',  label: 'Premium — BYD 15.4 kWh LiFePO₄',     spec: '15.4 kWh · 140 kg' },
