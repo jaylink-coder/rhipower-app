@@ -35,12 +35,17 @@ const PROFILES = [
   },
 ]
 
-export default function Step0_Welcome({ onSelect }) {
+export default function Step0_Welcome({ onSelect, onBack }) {
   return (
     <div className="min-h-[80vh] flex flex-col items-center justify-center px-4 py-12">
 
       {/* Brand mark */}
       <div className="text-center mb-8">
+        {onBack && (
+          <button onClick={onBack} className="text-xs text-gray-400 hover:text-gray-600 font-semibold mb-4 transition">
+            ← Back to Homepage
+          </button>
+        )}
         <div className="text-5xl mb-3">⚡</div>
         <h1 className="text-3xl font-black text-gray-900 tracking-tight">Welcome to RhiPower</h1>
         <p className="text-gray-500 mt-2 max-w-sm">

@@ -72,7 +72,7 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
   const totalOvernightWh = overnightEnergyWh * backupDays   // multiply by chosen backup days
   const neededUsableKWh  = (totalOvernightWh / 1000) / 0.80
   const batteryQty       = Math.max(1, Math.ceil(neededUsableKWh / t.battery.kwhEach))
-  const trueBattKWh      = batteryQty * t.battery.kwhEach
+  const trueBattKWh      = Math.round(batteryQty * t.battery.kwhEach * 10) / 10
 
   // 5. SOLAR PANEL SIZING
   const daytimeKWh = (totalRunningWatts * 7) / 1000  // ~7 hours of daytime load

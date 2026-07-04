@@ -198,7 +198,7 @@ const PROFILE_LABELS = {
 
 // ── Main Component ─────────────────────────────────────────────────────────
 export default function Step3_Results({
-  allResults, defaultTier, siteConfig, appliances, quantities, clientProfile, inventory, customerUser, onBack
+  allResults, defaultTier, defaultBackupDays, siteConfig, appliances, quantities, clientProfile, inventory, customerUser, onBack
 }) {
   const isPro      = clientProfile === 'professional'
   const isDIY      = clientProfile === 'diy'
@@ -206,7 +206,7 @@ export default function Step3_Results({
   const isBusiness = clientProfile === 'business'
 
   const [activeTier, setActiveTier] = useState(defaultTier || 'balanced')
-  const [backupDays, setBackupDays] = useState(1)
+  const [backupDays, setBackupDays] = useState(defaultBackupDays || 1)
   // Professionals land on BOM tab; business lands on quote; everyone else on design
   const [activeTab,  setActiveTab]  = useState(isPro ? 'bom' : isBusiness ? 'quote' : 'design')
   // Pre-select the recommended path based on experience level

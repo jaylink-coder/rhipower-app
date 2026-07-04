@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import Navbar           from './components/Navbar.jsx'
+import Homepage         from './pages/Homepage.jsx'
 import Step0_Welcome    from './pages/Step0_Welcome.jsx'
 import Step1_SiteConfig from './pages/Step1_SiteConfig.jsx'
 import Step2_Loads      from './pages/Step2_Loads.jsx'
@@ -8,6 +9,7 @@ import AdminInventory   from './pages/AdminInventory.jsx'
 import CustomerAuth     from './components/CustomerAuth.jsx'
 import MyQuotes         from './pages/MyQuotes.jsx'
 import { DEFAULT_APPLIANCES } from './data/appliances.js'
+import { DEFAULT_CONFIG }     from './data/defaultSiteConfig.js'
 import { fetchSolarData }     from './lib/nasaPower.js'
 import { runCalculation }     from './lib/calculator.js'
 import { fetchInventory }     from './lib/inventory.js'
@@ -15,17 +17,6 @@ import { supabase, isSupabaseReady } from './lib/supabase.js'
 import './App.css'
 
 const STEP_LABELS = ['Site & Intent', 'Electrical Loads', 'Results & Quote']
-
-const DEFAULT_CONFIG = {
-  location:   'nanyuki',
-  profile:    'airbnb',
-  wireDistM:  150,
-  siteKm:     200,
-  tier:       'balanced',
-  psh:        5.5,
-  pshSource:  'fallback',
-  pshMonthly: [],
-}
 
 export default function App() {
   const [step,          setStep]          = useState(0)
@@ -39,6 +30,8 @@ export default function App() {
   const [showAdmin,     setShowAdmin]     = useState(false)
   const [showAccount,   setShowAccount]   = useState(false)
   const [customerUser,  setCustomerUser]  = useState(null)   // null = signed out
+  const [showProfilePicker, setShowProfilePicker] = useState(false)  // step 0: homepage catalog vs. the 4-option picker
+  const [packageBackupDays, setPackageBackupDays] = useState(null)   // carries a picked package's suggested backup days into Step 3
 
   // Fetch live inventory prices from Supabase on first load
   useEffect(() => {
@@ -71,6 +64,17 @@ export default function App() {
 
   function handleProfileSelect(profile) {
     setClientProfile(profile)
+    setStep(1)
+  }
+
+  // Homepage catalog card picked — prefill the load builder from the example
+  // package, then still route through Site Config so the final price reflects
+  // the visitor's real location/distance rather than the catalog's defaults.
+  function applyPackage(pkg) {
+    setClientProfile(pkg.clientProfile)
+    setSiteConfig(prev => ({ ...prev, tier: pkg.tier }))
+    setQuantities(pkg.quantities)
+    setPackageBackupDays(pkg.backupDays)
     setStep(1)
   }
 
@@ -132,7 +136,11 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Navbar onAdmin={() => setShowAdmin(true)} onAccount={() => setShowAccount(true)} customerUser={customerUser} />
+      <Navbar
+        onAdmin={() => setShowAdmin(true)}
+        onAccount={() => setShowAccount(true)}
+        onLogoClick={() => { setStep(0); setShowProfilePicker(false) }}
+        customerUser={customerUser} />
 
       {/* Progress bar — hidden on welcome screen */}
       {step > 0 && (
@@ -183,8 +191,15 @@ export default function App() {
       )}
 
       {/* Pages */}
-      {step === 0 && (
-        <Step0_Welcome onSelect={handleProfileSelect} />
+      {step === 0 && !showProfilePicker && (
+        <Homepage
+          inventory={inventory}
+          onSelectPackage={applyPackage}
+          onCustomize={() => setShowProfilePicker(true)} />
+      )}
+
+      {step === 0 && showProfilePicker && (
+        <Step0_Welcome onSelect={handleProfileSelect} onBack={() => setShowProfilePicker(false)} />
       )}
 
       {step === 1 && (
@@ -212,6 +227,7 @@ export default function App() {
         <Step3_Results
           allResults={allResults}
           defaultTier={siteConfig.tier}
+          defaultBackupDays={packageBackupDays || 1}
           siteConfig={siteConfig}
           appliances={appliances}
           quantities={quantities}
