@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { formatKsh } from '../lib/calculator.js'
 import { DEFAULT_PRICE_BANDS } from '../data/skuInventory.js'
+import AdminHome from './AdminHome.jsx'
 import AdminLeads from './AdminLeads.jsx'
 import AdminCustomers from './AdminCustomers.jsx'
 import SessionTimeoutModal from '../components/SessionTimeoutModal.jsx'
@@ -553,9 +554,9 @@ function ItemDetailModal({ row, category, onClose, onChanged, onCloneRequested, 
   )
 }
 
-// AdminInventory keeps price bands in the same shape the DB rows already
-// have ({min_price, max_price}) rather than the [min,max] tuples used
-// elsewhere, since that's what's directly rendered/edited here.
+// The InventoryTable sub-view keeps price bands in the same shape the DB
+// rows already have ({min_price, max_price}) rather than the [min,max]
+// tuples used elsewhere, since that's what's directly rendered/edited here.
 function defaultBandsAsRows() {
   const out = {}
   Object.entries(DEFAULT_PRICE_BANDS).forEach(([category, tiers]) => {
@@ -965,9 +966,9 @@ function InventoryTable({ session }) {
 }
 
 // ── Main admin panel — auth gate + tabs ─────────────────────────────────────
-export default function AdminInventory({ onBack }) {
+export default function Admin({ onBack }) {
   const [session,     setSession]     = useState(undefined)
-  const [activeTab,   setActiveTab]   = useState('leads')
+  const [activeTab,   setActiveTab]   = useState('home')
   const [showWarning, setShowWarning] = useState(false)
 
   useEffect(() => {
@@ -1019,6 +1020,7 @@ export default function AdminInventory({ onBack }) {
         {/* Tab bar */}
         <div className="max-w-7xl mx-auto flex gap-1 mt-3">
           {[
+            { id: 'home',      label: '🏠 Command Centre' },
             { id: 'leads',     label: '📋 Leads & Pipeline' },
             { id: 'inventory', label: '📦 Inventory & Prices' },
             { id: 'customers', label: '👥 Customers' },
@@ -1034,6 +1036,7 @@ export default function AdminInventory({ onBack }) {
 
       {/* Tab content */}
       <div className="max-w-7xl mx-auto px-4 py-6">
+        {activeTab === 'home'      && <AdminHome session={session} onNavigate={setActiveTab} />}
         {activeTab === 'leads'     && <AdminLeads session={session} />}
         {activeTab === 'inventory' && <InventoryTable session={session} />}
         {activeTab === 'customers' && <AdminCustomers session={session} />}

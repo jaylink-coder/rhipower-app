@@ -5,7 +5,7 @@ import Step0_Welcome    from './pages/Step0_Welcome.jsx'
 import Step1_SiteConfig from './pages/Step1_SiteConfig.jsx'
 import Step2_Loads      from './pages/Step2_Loads.jsx'
 import Step3_Results    from './pages/Step3_Results.jsx'
-import AdminInventory   from './pages/AdminInventory.jsx'
+import Admin            from './pages/Admin.jsx'
 import CustomerAuth     from './components/CustomerAuth.jsx'
 import MyQuotes         from './pages/MyQuotes.jsx'
 import { DEFAULT_APPLIANCES } from './data/appliances.js'
@@ -126,7 +126,7 @@ export default function App() {
     setStep(3)
   }
 
-  if (showAdmin) return <AdminInventory onBack={() => setShowAdmin(false)} />
+  if (showAdmin) return <Admin onBack={() => setShowAdmin(false)} />
 
   if (showAccount) {
     return customerUser
