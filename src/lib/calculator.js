@@ -1,7 +1,8 @@
 // RhiPower Engineering Calculator
 // Pure functions — no UI, no side effects. Input data in, results out.
 
-import { TIERS as DEFAULT_TIERS, ZONES as DEFAULT_ZONES } from '../data/skuInventory.js'
+import { DEFAULT_PRODUCTS, TIER_META, ZONES as DEFAULT_ZONES } from '../data/skuInventory.js'
+import { pickDefaultProduct } from './tierProducts.js'
 
 const PEAK_SUN_HOURS = {
   nanyuki: 5.5,
@@ -18,17 +19,25 @@ export function formatKsh(amount) {
   return 'Ksh ' + Math.round(amount).toLocaleString('en-KE')
 }
 
-export function runCalculation(siteConfig, allAppliances, quantities, inventory = null) {
+// `selection` lets a caller (Step3's brand/model picker) override which
+// specific product is used per category. When omitted, the cheapest product
+// within the active tier is used — same effective behaviour as before
+// tiers held exactly one hardcoded product each.
+export function runCalculation(siteConfig, allAppliances, quantities, inventory = null, selection = null) {
   const {
     location, wireDistM, siteKm,
     tier       = 'balanced',
     backupDays = 1,
   } = siteConfig
 
-  const TIERS = inventory?.tiers || DEFAULT_TIERS
-  const ZONES = inventory?.zones || DEFAULT_ZONES
-  const t = TIERS[tier]
+  const products = inventory?.products || DEFAULT_PRODUCTS
+  const ZONES    = inventory?.zones    || DEFAULT_ZONES
   const z = ZONES
+
+  const panel    = selection?.panel    || pickDefaultProduct(products.panel,    tier) || products.panel[0]
+  const inverter = selection?.inverter || pickDefaultProduct(products.inverter, tier) || products.inverter[0]
+  const battery  = selection?.battery  || pickDefaultProduct(products.battery,  tier) || products.battery[0]
+  if (!panel || !inverter || !battery) return null
 
   // 1. AGGREGATE LOADS
   let totalRunningWatts = 0
@@ -65,20 +74,20 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
 
   // 3. INVERTER SIZING
   const neededInverterKW = Math.max((totalRunningWatts / 1000) * 1.25, maxSurgeWatts / 1000)
-  const inverterQty      = Math.max(1, Math.ceil(neededInverterKW / t.inverter.kwEach))
-  const totalInverterKW  = inverterQty * t.inverter.kwEach
+  const inverterQty      = Math.max(1, Math.ceil(neededInverterKW / inverter.kwEach))
+  const totalInverterKW  = inverterQty * inverter.kwEach
 
   // 4. BATTERY SIZING — scaled by backupDays (80% DOD safety floor)
   const totalOvernightWh = overnightEnergyWh * backupDays   // multiply by chosen backup days
   const neededUsableKWh  = (totalOvernightWh / 1000) / 0.80
-  const batteryQty       = Math.max(1, Math.ceil(neededUsableKWh / t.battery.kwhEach))
-  const trueBattKWh      = Math.round(batteryQty * t.battery.kwhEach * 10) / 10
+  const batteryQty       = Math.max(1, Math.ceil(neededUsableKWh / battery.kwhEach))
+  const trueBattKWh      = Math.round(batteryQty * battery.kwhEach * 10) / 10
 
   // 5. SOLAR PANEL SIZING
   const daytimeKWh = (totalRunningWatts * 7) / 1000  // ~7 hours of daytime load
   const neededPVkW = (trueBattKWh + daytimeKWh) / peakSunHours
-  const panelQty   = Math.max(1, Math.ceil((neededPVkW * 1000) / t.panel.wattsEach))
-  const truePVkW   = (panelQty * t.panel.wattsEach) / 1000
+  const panelQty   = Math.max(1, Math.ceil((neededPVkW * 1000) / panel.wattsEach))
+  const truePVkW   = (panelQty * panel.wattsEach) / 1000
 
   // 6. CABLE SIZING
   const cableIsHeavy = wireDistM > 120
@@ -98,7 +107,7 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
   const mountingCost = truePVkW * z.zoneA[5].cost
   const earthingCost = z.zoneA[6].cost
 
-  hardwareCostBase += panelQty    * t.panel.cost
+  hardwareCostBase += panelQty    * panel.cost
   hardwareCostBase += qtyBreaker  * z.zoneA[0].cost
   hardwareCostBase += qtySPD      * z.zoneA[1].cost
   hardwareCostBase += qtyFuses    * z.zoneA[2].cost
@@ -107,7 +116,7 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
   hardwareCostBase += earthingCost
 
   const zoneA = [
-    { qty: panelQty,                     label: t.panel.description,    sku: t.panel.sku },
+    { qty: panelQty,                     label: panel.description,      sku: panel.sku },
     { qty: qtyBreaker,                   label: z.zoneA[0].description },
     { qty: qtySPD,                       label: z.zoneA[1].description },
     { qty: qtyFuses,                     label: z.zoneA[2].description },
@@ -121,8 +130,8 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
   const lugM10Qty = inverterQty * 2
   const batCableM = batteryQty * 4
 
-  hardwareCostBase += batteryQty  * t.battery.cost
-  hardwareCostBase += inverterQty * t.inverter.cost
+  hardwareCostBase += batteryQty  * battery.cost
+  hardwareCostBase += inverterQty * inverter.cost
   hardwareCostBase += z.zoneB[0].cost
   hardwareCostBase += z.zoneB[1].cost
   hardwareCostBase += lugM8Qty  * z.zoneB[2].cost
@@ -130,8 +139,8 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
   hardwareCostBase += batCableM * z.zoneB[4].cost
 
   const zoneB = [
-    { qty: batteryQty,       label: t.battery.description,  sku: t.battery.sku  },
-    { qty: inverterQty,      label: t.inverter.description, sku: t.inverter.sku },
+    { qty: batteryQty,       label: battery.description,  sku: battery.sku  },
+    { qty: inverterQty,      label: inverter.description, sku: inverter.sku },
     { qty: 1,                label: z.zoneB[0].description },
     { qty: 1,                label: z.zoneB[1].description },
     { qty: lugM8Qty,         label: z.zoneB[2].description },
@@ -160,9 +169,9 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
   const totalLabor     = laborBase + laborPanels + laborBatteries + laborInverters
 
   // 11. LOGISTICS
-  const totalWeightKg = (panelQty    * t.panel.unitWeightKg) +
-                        (batteryQty  * t.battery.unitWeightKg) +
-                        (inverterQty * t.inverter.unitWeightKg)
+  const totalWeightKg = (panelQty    * panel.unitWeightKg) +
+                        (batteryQty  * battery.unitWeightKg) +
+                        (inverterQty * inverter.unitWeightKg)
 
   let ratePerKm = 40
   if (totalWeightKg > 250)  ratePerKm = 70
@@ -206,7 +215,15 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
     },
     // Metadata
     heavyMotorCount, wireDistM, siteKm, totalWeightKg,
-    tierLabel: TIERS[tier].label,
+    tierLabel: TIER_META[tier]?.label,
+    // Which specific products were used, and what else was available in this
+    // tier — Step3's brand/model picker renders straight from these.
+    selectedProducts:  { panel, inverter, battery },
+    availableProducts: {
+      panel:    products.panel.filter(p => p.tier === tier),
+      inverter: products.inverter.filter(p => p.tier === tier),
+      battery:  products.battery.filter(p => p.tier === tier),
+    },
     // Pre-formatted strings
     fmt: {
       materials: formatKsh(materialsAtSellPrice),

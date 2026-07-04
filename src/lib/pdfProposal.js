@@ -3,7 +3,7 @@
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { BUSINESS } from '../config.js'
-import { TIERS } from '../data/skuInventory.js'
+import { TIER_META } from '../data/skuInventory.js'
 import { KENYA_LOCATIONS } from '../lib/nasaPower.js'
 
 const NAVY  = [17, 24, 39]     // gray-900
@@ -19,7 +19,7 @@ function money(n) {
 // characters), and tier labels already end in "Tier" — strip both so PDF
 // text stays clean.
 function tierName(tier) {
-  const label = TIERS[tier]?.label || tier
+  const label = TIER_META[tier]?.label || tier
   return label.replace(/[^\x20-\x7E]/g, '').trim()
 }
 

@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { TIERS }              from '../data/skuInventory.js'
+import { TIER_META }          from '../data/skuInventory.js'
 import { KENYA_LOCATIONS }    from '../lib/nasaPower.js'
 import { runCalculation, formatKsh } from '../lib/calculator.js'
 import { BUSINESS }           from '../config.js'
@@ -41,6 +41,65 @@ function BomZone({ title, color, intro, items }) {
           </li>
         ))}
       </ul>
+    </div>
+  )
+}
+
+// Phone-comparison-style spec rows — only shows what's actually filled in
+// for a given product, since the admin may not have every spec on hand yet.
+function productSpecRows(category, p) {
+  const rows = []
+  if (category === 'panel') {
+    if (p.wattsEach)         rows.push(['Output', `${p.wattsEach}W`])
+    if (p.efficiencyPct)     rows.push(['Efficiency', `${p.efficiencyPct}%`])
+    if (p.warrantyYears)     rows.push(['Warranty', `${p.warrantyYears} yr`])
+    if (p.degradationPctYr)  rows.push(['Degradation', `${p.degradationPctYr}%/yr`])
+  } else if (category === 'inverter') {
+    if (p.kwEach)          rows.push(['Capacity', `${p.kwEach} kW`])
+    if (p.efficiencyPct)   rows.push(['Efficiency', `${p.efficiencyPct}%`])
+    if (p.mpptCount)       rows.push(['MPPT', `${p.mpptCount}`])
+    if (p.phase)           rows.push(['Phase', p.phase])
+    if (p.warrantyYears)   rows.push(['Warranty', `${p.warrantyYears} yr`])
+  } else if (category === 'battery') {
+    if (p.kwhEach)       rows.push(['Capacity', `${p.kwhEach} kWh`])
+    if (p.cycleLife)     rows.push(['Cycle life', `${p.cycleLife.toLocaleString()}`])
+    if (p.dodPct)        rows.push(['DoD', `${p.dodPct}%`])
+    if (p.warrantyYears) rows.push(['Warranty', `${p.warrantyYears} yr`])
+  }
+  return rows
+}
+
+function BrandPicker({ category, label, results, onPick }) {
+  const options  = results.availableProducts[category]
+  const selected = results.selectedProducts[category]
+  if (!options || options.length <= 1) return null
+
+  return (
+    <div className="bg-white border-2 border-gray-100 rounded-2xl p-4">
+      <div className="text-xs font-bold uppercase text-gray-400 tracking-wider mb-2">{label} — {options.length} options in this tier</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {options.map(opt => {
+          const isSel = opt.roleKey === selected.roleKey
+          const specs = productSpecRows(category, opt)
+          return (
+            <button key={opt.roleKey} onClick={() => onPick(category, opt)}
+              className={`text-left p-3 rounded-xl border-2 transition ${isSel ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="text-sm font-bold text-gray-800">{opt.description}</div>
+                {isSel && <span className="text-blue-600 text-xs font-bold shrink-0">✓ Selected</span>}
+              </div>
+              <div className="text-sm font-mono font-black text-gray-900 mt-1">{formatKsh(opt.cost)}</div>
+              {specs.length > 0 && (
+                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-2 text-xs text-gray-500">
+                  {specs.map(([k, v]) => (
+                    <div key={k}><span className="text-gray-400">{k}:</span> <span className="font-semibold text-gray-700">{v}</span></div>
+                  ))}
+                </div>
+              )}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -125,7 +184,7 @@ function EngineerMath({ eng, results, autoOpen = false }) {
 
 function buildWhatsAppMessage(clientName, clientPhone, siteConfig, results, tier, backupDays) {
   const loc     = KENYA_LOCATIONS[siteConfig.location]?.label || siteConfig.location
-  const tierLbl = TIERS[tier]?.label || tier
+  const tierLbl = TIER_META[tier]?.label || tier
   const r       = results
   return encodeURIComponent(
     `🌟 *RhiPower — My Solar System Design*\n\n` +
@@ -217,15 +276,22 @@ export default function Step3_Results({
   const [address,    setAddress]    = useState('')
   const [submitted,  setSubmitted]  = useState(false)
   const [quotationId, setQuotationId] = useState(null)
+  // Customer's explicit brand/model picks, kept per-tier so switching tiers
+  // to compare and coming back doesn't lose what they chose.
+  const [productOverrides, setProductOverrides] = useState({ premium: {}, balanced: {}, budget: {} })
 
-  // Re-run ALL THREE tiers live whenever backup days changes — keeps comparison cards in sync
+  // Re-run ALL THREE tiers live whenever backup days or a brand pick changes
   const liveAllResults = useMemo(() => {
     const out = {}
     ;['premium', 'balanced', 'budget'].forEach(tier => {
-      out[tier] = runCalculation({ ...siteConfig, tier, backupDays }, appliances, quantities, inventory)
+      out[tier] = runCalculation({ ...siteConfig, tier, backupDays }, appliances, quantities, inventory, productOverrides[tier])
     })
     return out
-  }, [backupDays, siteConfig, appliances, quantities, inventory])
+  }, [backupDays, siteConfig, appliances, quantities, inventory, productOverrides])
+
+  function handlePickProduct(category, product) {
+    setProductOverrides(p => ({ ...p, [activeTier]: { ...p[activeTier], [category]: product } }))
+  }
 
   // Active tier result (already inside liveAllResults, just aliased for readability)
   const results = liveAllResults[activeTier]
@@ -338,7 +404,7 @@ export default function Step3_Results({
         <div className="grid grid-cols-3 gap-3">
           {['premium', 'balanced', 'budget'].map(tier => {
             const r   = liveAllResults[tier]
-            const t   = TIERS[tier]
+            const t   = TIER_META[tier]
             const s   = TIER_STYLE[tier]
             const sel = activeTier === tier
             if (!r) return null
@@ -357,6 +423,18 @@ export default function Step3_Results({
           })}
         </div>
       </div>
+
+      {/* BRAND / MODEL PICKER — only shows a category when this tier has more than one option */}
+      {(results.availableProducts.panel.length > 1 || results.availableProducts.inverter.length > 1 || results.availableProducts.battery.length > 1) && (
+        <div className="space-y-3 mb-5">
+          <p className="text-xs font-bold uppercase text-gray-400 tracking-widest text-center">
+            {TIER_META[activeTier]?.label} has more than one option — pick what fits you
+          </p>
+          <BrandPicker category="panel"    label="☀️ Solar Panel"     results={results} onPick={handlePickProduct} />
+          <BrandPicker category="inverter" label="⚡ Inverter"        results={results} onPick={handlePickProduct} />
+          <BrandPicker category="battery"  label="🔋 Battery"         results={results} onPick={handlePickProduct} />
+        </div>
+      )}
 
       {/* STEP 2 — BACKUP DAYS SLIDER */}
       <div className="bg-white border-2 border-indigo-100 rounded-2xl p-5 mb-5 shadow-sm">
@@ -522,8 +600,14 @@ export default function Step3_Results({
               </div>
             </div>
             <div className="mt-4 text-xs text-gray-500 space-y-0.5">
-              <div>Prices inclusive of 16% VAT · Subject to site survey · {backupDays}-day backup · {TIERS[activeTier].label}</div>
-              <div>Warranty: 25-year panels · 10-year inverter · 10-year battery · 2-year installation workmanship</div>
+              <div>Prices inclusive of 16% VAT · Subject to site survey · {backupDays}-day backup · {TIER_META[activeTier]?.label}</div>
+              <div>
+                Warranty:{' '}
+                {results.selectedProducts?.panel?.warrantyYears    ? `${results.selectedProducts.panel.warrantyYears}-year panels` : '25-year panels'} ·{' '}
+                {results.selectedProducts?.inverter?.warrantyYears ? `${results.selectedProducts.inverter.warrantyYears}-year inverter` : '10-year inverter'} ·{' '}
+                {results.selectedProducts?.battery?.warrantyYears  ? `${results.selectedProducts.battery.warrantyYears}-year battery` : '10-year battery'} ·{' '}
+                2-year installation workmanship
+              </div>
             </div>
           </div>
 

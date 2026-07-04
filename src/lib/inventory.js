@@ -2,37 +2,56 @@
 // Falls back to hardcoded skuInventory.js values if DB is unreachable.
 
 import { supabase, isSupabaseReady } from './supabase.js'
-import { TIERS as DEFAULT_TIERS, ZONES as DEFAULT_ZONES } from '../data/skuInventory.js'
+import { DEFAULT_PRODUCTS, DEFAULT_PRICE_BANDS, ZONES as DEFAULT_ZONES } from '../data/skuInventory.js'
+import { deriveTier } from './tierProducts.js'
 
-export const FALLBACK = { tiers: DEFAULT_TIERS, zones: DEFAULT_ZONES }
+export const FALLBACK = { products: DEFAULT_PRODUCTS, priceBands: DEFAULT_PRICE_BANDS, zones: DEFAULT_ZONES }
+
+function toProduct(row) {
+  return {
+    roleKey:          row.role_key,
+    sku:              row.sku,
+    description:      row.description,
+    cost:             Number(row.buying_price_kes),
+    wattsEach:        row.watts_each     != null ? Number(row.watts_each)     : undefined,
+    kwhEach:          row.kwh_each       != null ? Number(row.kwh_each)       : undefined,
+    kwEach:           row.kw_each        != null ? Number(row.kw_each)        : undefined,
+    unitWeightKg:     row.unit_weight_kg != null ? Number(row.unit_weight_kg) : undefined,
+    efficiencyPct:    row.efficiency_pct     != null ? Number(row.efficiency_pct)     : undefined,
+    warrantyYears:    row.warranty_years     != null ? Number(row.warranty_years)     : undefined,
+    degradationPctYr: row.degradation_pct_yr != null ? Number(row.degradation_pct_yr) : undefined,
+    mpptCount:        row.mppt_count         != null ? Number(row.mppt_count)         : undefined,
+    phase:            row.phase        || undefined,
+    cycleLife:        row.cycle_life   != null ? Number(row.cycle_life) : undefined,
+    dodPct:           row.dod_pct      != null ? Number(row.dod_pct)    : undefined,
+    inStock:          row.in_stock !== false,
+  }
+}
 
 export async function fetchInventory() {
   if (!isSupabaseReady) return FALLBACK
 
   try {
-    const { data, error } = await supabase
-      .from('inventory_prices')
-      .select('*')
+    const [{ data: rows, error: rowsErr }, { data: bandRows, error: bandsErr }] = await Promise.all([
+      supabase.from('inventory_prices').select('*'),
+      supabase.from('price_bands').select('*'),
+    ])
 
-    if (error || !data?.length) return FALLBACK
+    if (rowsErr || !rows?.length) return FALLBACK
+
+    // price_bands may not exist yet (migration 007 not yet run) — fall back
+    // to the same default ranges rather than breaking tier derivation.
+    let priceBands = DEFAULT_PRICE_BANDS
+    if (!bandsErr && bandRows?.length) {
+      priceBands = {}
+      bandRows.forEach(b => {
+        priceBands[b.category] = priceBands[b.category] || {}
+        priceBands[b.category][b.tier] = [Number(b.min_price), b.max_price != null ? Number(b.max_price) : null]
+      })
+    }
 
     const byKey = {}
-    data.forEach(row => { byKey[row.role_key] = row })
-
-    function tierItem(key, def) {
-      const r = byKey[key]
-      if (!r) return def
-      return {
-        ...def,
-        sku:         r.sku,
-        description: r.description,
-        cost:        Number(r.buying_price_kes),
-        ...(r.watts_each     != null && { wattsEach:    Number(r.watts_each)     }),
-        ...(r.kwh_each       != null && { kwhEach:      Number(r.kwh_each)       }),
-        ...(r.kw_each        != null && { kwEach:       Number(r.kw_each)        }),
-        ...(r.unit_weight_kg != null && { unitWeightKg: Number(r.unit_weight_kg) }),
-      }
-    }
+    rows.forEach(r => { byKey[r.role_key] = r })
 
     function zoneItem(key, def) {
       const r = byKey[key]
@@ -40,27 +59,22 @@ export async function fetchInventory() {
       return { ...def, sku: r.sku, description: r.description, cost: Number(r.buying_price_kes) }
     }
 
+    // Any number of products per category — tier is derived from price, not
+    // stored, so this reflects live price_bands even if they've been edited.
+    const products = { panel: [], inverter: [], battery: [] }
+    rows.forEach(row => {
+      if (!(row.category in products)) return
+      const product = toProduct(row)
+      product.tier = deriveTier(row.category, product.cost, priceBands)
+      products[row.category].push(product)
+    })
+    ;['panel', 'inverter', 'battery'].forEach(cat => {
+      if (!products[cat].length) products[cat] = DEFAULT_PRODUCTS[cat]
+    })
+
     return {
-      tiers: {
-        premium: {
-          ...DEFAULT_TIERS.premium,
-          panel:    tierItem('premium_panel',    DEFAULT_TIERS.premium.panel),
-          inverter: tierItem('premium_inverter', DEFAULT_TIERS.premium.inverter),
-          battery:  tierItem('premium_battery',  DEFAULT_TIERS.premium.battery),
-        },
-        balanced: {
-          ...DEFAULT_TIERS.balanced,
-          panel:    tierItem('balanced_panel',    DEFAULT_TIERS.balanced.panel),
-          inverter: tierItem('balanced_inverter', DEFAULT_TIERS.balanced.inverter),
-          battery:  tierItem('balanced_battery',  DEFAULT_TIERS.balanced.battery),
-        },
-        budget: {
-          ...DEFAULT_TIERS.budget,
-          panel:    tierItem('budget_panel',    DEFAULT_TIERS.budget.panel),
-          inverter: tierItem('budget_inverter', DEFAULT_TIERS.budget.inverter),
-          battery:  tierItem('budget_battery',  DEFAULT_TIERS.budget.battery),
-        },
-      },
+      products,
+      priceBands,
       zones: {
         zoneA: [
           zoneItem('zoneA_breaker',  DEFAULT_ZONES.zoneA[0]),

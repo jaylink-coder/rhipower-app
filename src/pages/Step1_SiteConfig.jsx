@@ -1,4 +1,4 @@
-import { TIERS } from '../data/skuInventory.js'
+import { TIER_META } from '../data/skuInventory.js'
 import { KENYA_LOCATIONS } from '../lib/nasaPower.js'
 
 const PROFILES = [
@@ -152,7 +152,7 @@ export default function Step1_SiteConfig({ config, nasaLoading, onChange, onNext
         <div>
           <label className="block text-sm font-semibold text-gray-700 mb-3">Hardware Tier</label>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {Object.entries(TIERS).map(([key, t]) => (
+            {Object.entries(TIER_META).map(([key, t]) => (
               <button key={key} onClick={() => set('tier', key)}
                 className={`p-4 rounded-xl border-2 text-left transition
                   ${config.tier === key
