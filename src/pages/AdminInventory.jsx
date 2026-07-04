@@ -275,7 +275,7 @@ export default function AdminInventory({ onBack }) {
       )}
       {/* Shared admin header */}
       <div className="bg-gray-900 text-white px-6 py-4 sticky top-0 z-10">
-        <div className="max-w-5xl mx-auto flex justify-between items-center">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
           <div>
             <h1 className="text-xl font-black">⚡ RhiPower Admin</h1>
             <p className="text-xs text-gray-400 mt-0.5">{session.user?.email}</p>
@@ -286,7 +286,7 @@ export default function AdminInventory({ onBack }) {
           </div>
         </div>
         {/* Tab bar */}
-        <div className="max-w-5xl mx-auto flex gap-1 mt-3">
+        <div className="max-w-7xl mx-auto flex gap-1 mt-3">
           {[
             { id: 'leads',     label: '📋 Leads & Pipeline' },
             { id: 'inventory', label: '📦 Inventory & Prices' },
@@ -302,7 +302,7 @@ export default function AdminInventory({ onBack }) {
       </div>
 
       {/* Tab content */}
-      <div className="max-w-5xl mx-auto px-4 py-6">
+      <div className="max-w-7xl mx-auto px-4 py-6">
         {activeTab === 'leads'     && <AdminLeads session={session} />}
         {activeTab === 'inventory' && <InventoryTable session={session} />}
         {activeTab === 'customers' && <AdminCustomers session={session} />}
