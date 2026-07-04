@@ -6,6 +6,7 @@ import { BUSINESS }           from '../config.js'
 import SystemDiagram          from '../components/SystemDiagram.jsx'
 import { supabase, isSupabaseReady } from '../lib/supabase.js'
 import MpesaDeposit from '../components/MpesaDeposit.jsx'
+import { generateProposalPDF } from '../lib/pdfProposal.js'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 const TIER_STYLE = {
@@ -145,7 +146,7 @@ function buildWhatsAppMessage(clientName, clientPhone, siteConfig, results, tier
 
 // ── Shared contact form ────────────────────────────────────────────────────
 function ContactForm({ name, phone, email, address, setName, setPhone, setEmail, setAddress,
-                       submitted, onWhatsApp, onPrint, ctaLabel }) {
+                       submitted, onWhatsApp, onDownloadPdf, ctaLabel }) {
   if (submitted) {
     return (
       <div className="bg-green-100 border border-green-300 text-green-800 p-4 rounded-xl text-sm font-semibold text-center">
@@ -178,9 +179,9 @@ function ContactForm({ name, phone, email, address, setName, setPhone, setEmail,
           </svg>
           {ctaLabel}
         </button>
-        <button onClick={onPrint}
+        <button onClick={onDownloadPdf}
           className="px-4 border-2 border-gray-200 rounded-xl text-gray-500 hover:bg-gray-50 font-bold transition text-sm">
-          🖨️ PDF
+          ⬇️ PDF
         </button>
       </div>
     </div>
@@ -286,8 +287,15 @@ export default function Step3_Results({
     setSubmitted(true)
   }
 
+  function handleDownloadPdf() {
+    generateProposalPDF({
+      client: { name, phone, email, address },
+      siteConfig, results, tier: activeTier, backupDays,
+    })
+  }
+
   const contactProps = { name, phone, email, address, setName, setPhone, setEmail, setAddress,
-                         submitted, onWhatsApp: handleWhatsApp, onPrint: () => window.print() }
+                         submitted, onWhatsApp: handleWhatsApp, onDownloadPdf: handleDownloadPdf }
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
@@ -629,9 +637,9 @@ export default function Step3_Results({
                 <li>💡 <strong>Hand this printout to any qualified electrician</strong> — they have everything</li>
               </ul>
               <div className="flex flex-col sm:flex-row gap-3">
-                <button onClick={() => window.print()}
+                <button onClick={handleDownloadPdf}
                   className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black p-4 rounded-xl transition">
-                  🖨️ Print / Save PDF Spec Sheet
+                  ⬇️ Download PDF Spec Sheet
                 </button>
                 <button onClick={() => {
                   const msg = buildWhatsAppMessage('DIY Order', '', siteConfig, results, activeTier, backupDays)
