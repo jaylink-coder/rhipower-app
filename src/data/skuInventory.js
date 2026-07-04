@@ -43,31 +43,34 @@ export const DEFAULT_PRODUCTS = {
 // Zone components are shared across all tiers — not price-banded, since
 // there's one correct spec per job (e.g. cable size is a safety requirement,
 // not a brand preference).
+// roleKey on each entry matches the DB role_key used to look these rows up
+// in inventory_prices (see zoneItem() in lib/inventory.js) — carried through
+// so BOM lines can be traced back to a real stock item (Sales Orders/PO).
 export const ZONES = {
   // ─── ZONE A: SOLAR ARRAY COMBINER BOX ───
   zoneA: [
-    { sku: 'DC-BREAKER-63A', description: 'Chint NBI-63DC 2-Pole 1000V DC Isolator Breaker',               cost: 3500 },
-    { sku: 'DC-SPD-1000V',   description: 'Chint NU6 Type 2 Heavy-Duty DC Surge Protective Device',         cost: 4200 },
-    { sku: 'DC-FUSE-15A',    description: 'Mersen 1000V DC Photovoltaic Fuse Holder + Link (15A)',          cost: 850  },
-    { sku: 'CABLE-DC-6MM',   description: '6mm² Kinu Copper DC Solar Cable (Per Meter)',                    cost: 180  },
-    { sku: 'CABLE-DC-10MM',  description: '10mm² Kinu Copper DC Solar Cable (Per Meter)',                   cost: 280  },
-    { sku: 'MOUNT-ALU-KIT',  description: 'Aluminium Roof Mounting Structure (rails, clamps, L-feet) — Per kWp', cost: 14000 },
-    { sku: 'EARTH-LA-KIT',   description: 'Earthing & Lightning Protection Kit (rods, arrestor, bonding cable)', cost: 22000 },
+    { roleKey: 'zoneA_breaker',  sku: 'DC-BREAKER-63A', description: 'Chint NBI-63DC 2-Pole 1000V DC Isolator Breaker',               cost: 3500 },
+    { roleKey: 'zoneA_spd',      sku: 'DC-SPD-1000V',   description: 'Chint NU6 Type 2 Heavy-Duty DC Surge Protective Device',         cost: 4200 },
+    { roleKey: 'zoneA_fuse',     sku: 'DC-FUSE-15A',    description: 'Mersen 1000V DC Photovoltaic Fuse Holder + Link (15A)',          cost: 850  },
+    { roleKey: 'zoneA_cable6',   sku: 'CABLE-DC-6MM',   description: '6mm² Kinu Copper DC Solar Cable (Per Meter)',                    cost: 180  },
+    { roleKey: 'zoneA_cable10',  sku: 'CABLE-DC-10MM',  description: '10mm² Kinu Copper DC Solar Cable (Per Meter)',                   cost: 280  },
+    { roleKey: 'zoneA_mounting', sku: 'MOUNT-ALU-KIT',  description: 'Aluminium Roof Mounting Structure (rails, clamps, L-feet) — Per kWp', cost: 14000 },
+    { roleKey: 'zoneA_earthing', sku: 'EARTH-LA-KIT',   description: 'Earthing & Lightning Protection Kit (rods, arrestor, bonding cable)', cost: 22000 },
   ],
 
   // ─── ZONE B: BATTERY COMBINER STATION ───
   zoneB: [
-    { sku: 'DC-MCCB-400A',   description: 'Chint NM8N 400A 2-Pole High-Current DC Battery MCCB',           cost: 18500 },
-    { sku: 'COPPER-BUSBAR',  description: 'Solid Tinned Copper Multi-Battery Interconnection Busbar',       cost: 9000  },
-    { sku: 'LUG-50-M8',      description: 'Tinned Heavy-Gauge 50mm² Copper Lug — M8 (Battery Terminals)',  cost: 65    },
-    { sku: 'LUG-50-M10',     description: 'Tinned Heavy-Gauge 50mm² Copper Lug — M10 (Inverter Terminals)', cost: 75   },
-    { sku: 'CABLE-BAT-50MM', description: '50mm² Flexible Rubber Heat-Resistant Battery Cable (Per Meter)', cost: 1100 },
+    { roleKey: 'zoneB_mccb',     sku: 'DC-MCCB-400A',   description: 'Chint NM8N 400A 2-Pole High-Current DC Battery MCCB',           cost: 18500 },
+    { roleKey: 'zoneB_busbar',   sku: 'COPPER-BUSBAR',  description: 'Solid Tinned Copper Multi-Battery Interconnection Busbar',       cost: 9000  },
+    { roleKey: 'zoneB_lug_m8',   sku: 'LUG-50-M8',      description: 'Tinned Heavy-Gauge 50mm² Copper Lug — M8 (Battery Terminals)',  cost: 65    },
+    { roleKey: 'zoneB_lug_m10',  sku: 'LUG-50-M10',     description: 'Tinned Heavy-Gauge 50mm² Copper Lug — M10 (Inverter Terminals)', cost: 75   },
+    { roleKey: 'zoneB_batcable', sku: 'CABLE-BAT-50MM', description: '50mm² Flexible Rubber Heat-Resistant Battery Cable (Per Meter)', cost: 1100 },
   ],
 
   // ─── ZONE C: AC DISTRIBUTION BOARD ───
   zoneC: [
-    { sku: 'AC-MCB-3P-63A',  description: 'Chint 3-Phase 63A Mains AC Overload Circuit Breaker',           cost: 4500 },
-    { sku: 'SMART-BREAKER',  description: 'Tuya 40A Wi-Fi Smart DIN-Rail Breaker (Method C Rain Automator)', cost: 6500 },
-    { sku: 'AC-CONTACTOR-40A', description: 'Chint 40A 2-Pole Heavy-Duty AC Power Contactor Relay',         cost: 3800 },
+    { roleKey: 'zoneC_mcb',       sku: 'AC-MCB-3P-63A',  description: 'Chint 3-Phase 63A Mains AC Overload Circuit Breaker',           cost: 4500 },
+    { roleKey: 'zoneC_smart',     sku: 'SMART-BREAKER',  description: 'Tuya 40A Wi-Fi Smart DIN-Rail Breaker (Method C Rain Automator)', cost: 6500 },
+    { roleKey: 'zoneC_contactor', sku: 'AC-CONTACTOR-40A', description: 'Chint 40A 2-Pole Heavy-Duty AC Power Contactor Relay',         cost: 3800 },
   ],
 }

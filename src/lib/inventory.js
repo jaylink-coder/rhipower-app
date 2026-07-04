@@ -31,6 +31,25 @@ function toProduct(row) {
   }
 }
 
+// Shared "stock_qty changed" logger — routes every write path (manual admin
+// adjustment, PO receiving, future Sales Order fulfillment) through one
+// place so stock_movements stays a trustworthy, consistently-tagged ledger
+// instead of three call sites each doing their own insert().
+export async function logStockMovement({ roleKey, quantityChanged, reason, session, movementType = 'adjustment', sourceType = null, sourceId = null }) {
+  if (!quantityChanged) return
+  const { error } = await supabase.from('stock_movements').insert({
+    role_key:         roleKey,
+    quantity_changed: quantityChanged,
+    reason:           reason || null,
+    movement_type:    movementType,
+    source_type:      sourceType,
+    source_id:        sourceId,
+    admin_id:         session?.user?.id || null,
+    admin_email:      session?.user?.email || null,
+  })
+  if (error) console.warn('[RhiPower] stock movement log failed:', error.message)
+}
+
 export async function fetchInventory() {
   if (!isSupabaseReady) return FALLBACK
 
@@ -58,8 +77,9 @@ export async function fetchInventory() {
 
     function zoneItem(key, def) {
       const r = byKey[key]
-      if (!r) return def
-      return { ...def, sku: r.sku, description: r.description, cost: Number(r.buying_price_kes) }
+      const base = { ...def, roleKey: key }
+      if (!r) return base
+      return { ...base, sku: r.sku, description: r.description, cost: Number(r.buying_price_kes) }
     }
 
     // Any number of products per category — tier is derived from price, not

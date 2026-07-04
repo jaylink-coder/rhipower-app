@@ -9,6 +9,9 @@ import SessionTimeoutModal from '../components/SessionTimeoutModal.jsx'
 import { useSessionTimeout } from '../hooks/useSessionTimeout.js'
 import { SESSION_TIMEOUT_MINUTES, SESSION_WARN_MINUTES } from '../lib/roles.js'
 import { logAdminAction } from '../lib/auditLog.js'
+import { logStockMovement } from '../lib/inventory.js'
+import AdminSuppliers from './AdminSuppliers.jsx'
+import AdminPurchaseOrders from './AdminPurchaseOrders.jsx'
 
 // Panel/Inverter/Battery are no longer fixed 3-slot groups — any number of
 // products can exist per category, and tier is derived from price, not
@@ -703,11 +706,7 @@ function InventoryTable({ session, invSection }) {
       // Log a ledger entry whenever the quantity actually changed
       const delta = payload.stock_qty != null ? payload.stock_qty - (previousQty || 0) : 0
       if (delta !== 0) {
-        await supabase.from('stock_movements').insert({
-          role_key: key, quantity_changed: delta,
-          reason: form.reason?.trim() || null,
-          admin_id: session?.user?.id || null, admin_email: session?.user?.email || null,
-        })
+        await logStockMovement({ roleKey: key, quantityChanged: delta, reason: form.reason?.trim(), session })
       }
     }
   }
@@ -949,10 +948,12 @@ function InventoryTable({ session, invSection }) {
 
 // ── Main admin panel — auth gate + tabs ─────────────────────────────────────
 const SECTIONS = [
-  { id: 'home',      label: '🏠 Command Centre' },
-  { id: 'leads',     label: '📋 Leads & Pipeline' },
-  { id: 'inventory', label: '📦 Inventory & Prices' },
-  { id: 'customers', label: '👥 Customers' },
+  { id: 'home',       label: '🏠 Command Centre' },
+  { id: 'leads',      label: '📋 Leads & Pipeline' },
+  { id: 'inventory',  label: '📦 Inventory & Prices' },
+  { id: 'suppliers',  label: '🏭 Suppliers' },
+  { id: 'purchasing', label: '🧾 Purchase Orders' },
+  { id: 'customers',  label: '👥 Customers' },
 ]
 
 const INVENTORY_SUBS = [
@@ -1043,10 +1044,12 @@ export default function Admin({ onBack }) {
         </div>
 
         <div className="max-w-7xl px-4 py-6">
-          {activeTab === 'home'      && <AdminHome session={session} onNavigate={setActiveTab} />}
-          {activeTab === 'leads'     && <AdminLeads session={session} />}
-          {activeTab === 'inventory' && <InventoryTable session={session} invSection={invSection} />}
-          {activeTab === 'customers' && <AdminCustomers session={session} />}
+          {activeTab === 'home'       && <AdminHome session={session} onNavigate={setActiveTab} />}
+          {activeTab === 'leads'      && <AdminLeads session={session} />}
+          {activeTab === 'inventory'  && <InventoryTable session={session} invSection={invSection} />}
+          {activeTab === 'suppliers'  && <AdminSuppliers session={session} />}
+          {activeTab === 'purchasing' && <AdminPurchaseOrders session={session} />}
+          {activeTab === 'customers'  && <AdminCustomers session={session} />}
         </div>
       </div>
     </div>

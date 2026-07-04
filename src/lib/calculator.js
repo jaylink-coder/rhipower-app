@@ -116,13 +116,13 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
   hardwareCostBase += earthingCost
 
   const zoneA = [
-    { qty: panelQty,                     label: panel.description,      sku: panel.sku },
-    { qty: qtyBreaker,                   label: z.zoneA[0].description },
-    { qty: qtySPD,                       label: z.zoneA[1].description },
-    { qty: qtyFuses,                     label: z.zoneA[2].description },
-    { qty: `${cableMeters}m`,            label: cableSpec },
-    { qty: `${truePVkW.toFixed(1)} kWp`, label: z.zoneA[5].description, sku: z.zoneA[5].sku },
-    { qty: 1,                            label: z.zoneA[6].description, sku: z.zoneA[6].sku },
+    { qty: panelQty,                     label: panel.description,      sku: panel.sku,     roleKey: panel.roleKey },
+    { qty: qtyBreaker,                   label: z.zoneA[0].description, roleKey: z.zoneA[0].roleKey },
+    { qty: qtySPD,                       label: z.zoneA[1].description, roleKey: z.zoneA[1].roleKey },
+    { qty: qtyFuses,                     label: z.zoneA[2].description, roleKey: z.zoneA[2].roleKey },
+    { qty: `${cableMeters}m`,            label: cableSpec,              roleKey: cableSKU.roleKey },
+    { qty: `${truePVkW.toFixed(1)} kWp`, label: z.zoneA[5].description, sku: z.zoneA[5].sku, roleKey: z.zoneA[5].roleKey },
+    { qty: 1,                            label: z.zoneA[6].description, sku: z.zoneA[6].sku, roleKey: z.zoneA[6].roleKey },
   ]
 
   // 8. ZONE B BOM (Battery Combiner)
@@ -139,13 +139,13 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
   hardwareCostBase += batCableM * z.zoneB[4].cost
 
   const zoneB = [
-    { qty: batteryQty,       label: battery.description,  sku: battery.sku  },
-    { qty: inverterQty,      label: inverter.description, sku: inverter.sku },
-    { qty: 1,                label: z.zoneB[0].description },
-    { qty: 1,                label: z.zoneB[1].description },
-    { qty: lugM8Qty,         label: z.zoneB[2].description },
-    { qty: lugM10Qty,        label: z.zoneB[3].description },
-    { qty: `${batCableM}m`,  label: z.zoneB[4].description },
+    { qty: batteryQty,       label: battery.description,  sku: battery.sku,  roleKey: battery.roleKey  },
+    { qty: inverterQty,      label: inverter.description, sku: inverter.sku, roleKey: inverter.roleKey },
+    { qty: 1,                label: z.zoneB[0].description, roleKey: z.zoneB[0].roleKey },
+    { qty: 1,                label: z.zoneB[1].description, roleKey: z.zoneB[1].roleKey },
+    { qty: lugM8Qty,         label: z.zoneB[2].description, roleKey: z.zoneB[2].roleKey },
+    { qty: lugM10Qty,        label: z.zoneB[3].description, roleKey: z.zoneB[3].roleKey },
+    { qty: `${batCableM}m`,  label: z.zoneB[4].description, roleKey: z.zoneB[4].roleKey },
   ]
 
   // 9. ZONE C BOM (AC Distribution)
@@ -154,10 +154,10 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
   if (heavyMotorCount > 0) hardwareCostBase += heavyMotorCount * z.zoneC[2].cost
 
   const zoneC = [
-    { qty: 1,              label: z.zoneC[0].description },
-    { qty: 1,              label: z.zoneC[1].description },
+    { qty: 1,              label: z.zoneC[0].description, roleKey: z.zoneC[0].roleKey },
+    { qty: 1,              label: z.zoneC[1].description, roleKey: z.zoneC[1].roleKey },
     ...(heavyMotorCount > 0
-      ? [{ qty: heavyMotorCount, label: z.zoneC[2].description + ' — pump load-shedding circuits' }]
+      ? [{ qty: heavyMotorCount, label: z.zoneC[2].description + ' — pump load-shedding circuits', roleKey: z.zoneC[2].roleKey }]
       : []),
   ]
 

@@ -23,6 +23,12 @@ const ACTION_LABELS = {
   site_visit_completed:  p => `Completed a site visit (${p.target})`,
   customer_suspended:    p => `Suspended customer ${p.target}`,
   customer_reactivated:  p => `Reactivated customer ${p.target}`,
+  supplier_added:        p => `Added supplier "${p.details?.name || p.target}"`,
+  supplier_updated:      p => `Updated supplier ${p.target}`,
+  supplier_status_change:p => `Changed supplier status (${p.target})`,
+  po_created:            p => `Created a purchase order (${p.target})`,
+  po_status_change:      p => `Updated a purchase order's status (${p.target})`,
+  po_line_received:      p => `Received stock against a purchase order (${p.target})`,
 }
 
 function timeAgo(iso) {
@@ -47,7 +53,8 @@ export default function AdminHome({ session, onNavigate }) {
       supabase.from('customer_profiles').select('id', { count: 'exact', head: true }),
       supabase.from('inventory_prices').select('role_key, description, stock_qty, reorder_point, is_active'),
       supabase.from('admin_audit_log').select('*').order('created_at', { ascending: false }).limit(15),
-    ]).then(([leadsRes, custRes, invRes, logRes]) => {
+      supabase.from('purchase_orders').select('status'),
+    ]).then(([leadsRes, custRes, invRes, logRes, poRes]) => {
       const leads = leadsRes.data || []
       const totalLeads   = leads.length
       const newLeads     = leads.filter(l => (l.status || 'new') === 'new').length
@@ -57,10 +64,13 @@ export default function AdminHome({ session, onNavigate }) {
       const products = (invRes.data || []).filter(r => r.is_active !== false)
       const low = products.filter(r => r.stock_qty != null && r.reorder_point != null && r.stock_qty <= r.reorder_point)
 
+      const openPOs = (poRes.data || []).filter(p => ['draft', 'ordered', 'partially_received'].includes(p.status)).length
+
       setStats({
         totalLeads, newLeads, pipelineVal, installedRev,
         totalCustomers: custRes.count || 0,
         totalProducts: products.length,
+        openPOs,
       })
       setLowStock(low)
       setActivity(logRes.data || [])
@@ -80,6 +90,7 @@ export default function AdminHome({ session, onNavigate }) {
     { label: 'Customers',       val: stats.totalCustomers,          sub: 'registered accounts',                color: 'bg-blue-50 text-blue-700 border-blue-200',    nav: 'customers' },
     { label: 'Active Products', val: stats.totalProducts,           sub: 'panels/inverters/batteries',         color: 'bg-purple-50 text-purple-700 border-purple-200', nav: 'inventory' },
     { label: 'Low Stock Alerts',val: lowStock.length,                sub: lowStock.length ? 'needs reordering' : 'all good', color: lowStock.length ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-500 border-gray-200', nav: 'inventory' },
+    { label: 'Open POs',        val: stats.openPOs,                  sub: 'purchase orders in progress',        color: 'bg-cyan-50 text-cyan-700 border-cyan-200',      nav: 'purchasing' },
   ]
 
   return (
@@ -122,6 +133,7 @@ export default function AdminHome({ session, onNavigate }) {
             <div className="grid grid-cols-2 gap-2">
               <button onClick={() => onNavigate('leads')} className="text-left bg-gray-50 hover:bg-gray-100 rounded-xl p-3 text-sm font-bold text-gray-700 transition">📋 View Leads</button>
               <button onClick={() => onNavigate('inventory')} className="text-left bg-gray-50 hover:bg-gray-100 rounded-xl p-3 text-sm font-bold text-gray-700 transition">📦 Manage Inventory</button>
+              <button onClick={() => onNavigate('purchasing')} className="text-left bg-gray-50 hover:bg-gray-100 rounded-xl p-3 text-sm font-bold text-gray-700 transition">🧾 Purchase Orders</button>
               <button onClick={() => onNavigate('customers')} className="text-left bg-gray-50 hover:bg-gray-100 rounded-xl p-3 text-sm font-bold text-gray-700 transition">👥 View Customers</button>
               <a href="https://supabase.com/dashboard/project/qsuisdtnzrxrdqcqbvem" target="_blank" rel="noreferrer"
                 className="text-left bg-gray-50 hover:bg-gray-100 rounded-xl p-3 text-sm font-bold text-gray-700 transition">🗄️ Open Supabase</a>
