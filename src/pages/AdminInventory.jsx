@@ -589,6 +589,9 @@ function InventoryTable({ session }) {
   const [addingTo, setAddingTo] = useState(null)  // which category's "+ Add Item" form is open
   const [cloneSource, setCloneSource] = useState(null)  // row being cloned into the Add Item form, if any
   const [viewingItem, setViewingItem] = useState(null)  // { row, category } for the detail modal
+  // Splits the growing inventory content into two focused sub-views instead
+  // of one long stacked scroll of six tables.
+  const [invSection, setInvSection] = useState('products')
 
   // Stock qty + reorder point + supplier (+ specs, for product categories) —
   // edited together as one small form, separate from price since touched far less often.
@@ -750,9 +753,26 @@ function InventoryTable({ session }) {
         <div><strong>Tier is now automatic:</strong> it's derived from where a product's buying price falls in the Price Bands panel below — add a second or third brand to any category and it'll slot into the right tier on its own.</div>
       </div>
 
-      <PriceBandsPanel priceBands={priceBands} session={session} onChange={handleBandSaved} />
+      {/* Sub-navigation — Products (branded, price-banded, customer-facing
+          options) vs Components (shared BOM parts, same regardless of tier) */}
+      <div className="flex gap-1 bg-gray-100 rounded-2xl p-1 w-fit">
+        {[
+          { id: 'products',   label: '📦 Products',       count: productGroups.reduce((n, g) => n + g.items.length, 0) },
+          { id: 'components', label: '🔧 BOM Components', count: GROUPS.reduce((n, g) => n + g.items.length, 0) },
+        ].map(s => (
+          <button key={s.id} onClick={() => setInvSection(s.id)}
+            className={`px-4 py-2 rounded-xl text-sm font-bold transition
+              ${invSection === s.id ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>
+            {s.label} <span className="text-xs text-gray-400">({s.count})</span>
+          </button>
+        ))}
+      </div>
 
-      {allGroups.map(group => (
+      {invSection === 'products' && (
+        <PriceBandsPanel priceBands={priceBands} session={session} onChange={handleBandSaved} />
+      )}
+
+      {(invSection === 'products' ? productGroups : GROUPS).map(group => (
         <div key={group.title} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="bg-gray-50 border-b border-gray-100 px-5 py-3 flex items-center justify-between">
             <h3 className="font-black text-gray-700 text-sm">{group.title}</h3>
