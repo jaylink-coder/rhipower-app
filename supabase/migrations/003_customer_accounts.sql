@@ -39,15 +39,24 @@ CREATE POLICY "customer_can_read_own_profile"
   ON customer_profiles FOR SELECT TO authenticated
   USING (auth.uid() = id);
 
+-- SET search_path = '' + fully-qualified public.customer_profiles is required here —
+-- Supabase's own documented pattern for auth.users triggers pins this explicitly,
+-- because the role that fires the trigger during signup can't reliably resolve an
+-- unqualified table name. Omitting this causes signup to fail with a generic
+-- "Database error saving new user" (500) from the Auth server.
 CREATE OR REPLACE FUNCTION handle_new_customer()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
 BEGIN
-  INSERT INTO customer_profiles (id, email, full_name)
+  INSERT INTO public.customer_profiles (id, email, full_name)
   VALUES (NEW.id, NEW.email, NEW.raw_user_meta_data->>'full_name')
   ON CONFLICT (id) DO NOTHING;
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 DROP TRIGGER IF EXISTS on_auth_user_created_customer_profile ON auth.users;
 CREATE TRIGGER on_auth_user_created_customer_profile

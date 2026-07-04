@@ -3,6 +3,16 @@
 import { useState } from 'react'
 import { supabase, isSupabaseReady } from '../lib/supabase.js'
 
+// Always resolve to a readable string, however the error is shaped, so the
+// UI never renders something like a stray "{}" instead of real feedback.
+function readableAuthError(err) {
+  const raw = typeof err?.message === 'string' && err.message ? err.message : String(err ?? 'Something went wrong')
+  if (raw.toLowerCase().includes('database error saving new user')) {
+    return "We couldn't create your account due to a server issue. Please try again in a moment."
+  }
+  return raw
+}
+
 export default function CustomerAuth({ onBack, onSignedIn }) {
   const [mode,     setMode]     = useState('signin')   // 'signin' | 'signup'
   const [email,    setEmail]    = useState('')
@@ -24,7 +34,7 @@ export default function CustomerAuth({ onBack, onSignedIn }) {
         options: { data: { full_name: name.trim() } },
       })
       setLoading(false)
-      if (signUpError) { setError(signUpError.message); return }
+      if (signUpError) { console.error('[RhiPower] signup failed:', signUpError); setError(readableAuthError(signUpError)); return }
       if (data.session) { onSignedIn(data.session.user); return }
       setSent(true)   // email confirmation required before a session exists
       return
@@ -33,7 +43,7 @@ export default function CustomerAuth({ onBack, onSignedIn }) {
     const { data, error: signInError } = await supabase.auth.signInWithPassword({
       email: email.trim(), password,
     })
-    if (signInError) { setLoading(false); setError(signInError.message); return }
+    if (signInError) { setLoading(false); setError(readableAuthError(signInError)); return }
 
     const { data: profile } = await supabase.from('customer_profiles')
       .select('status').eq('id', data.session.user.id).single()
