@@ -201,10 +201,20 @@ function PriceBandsPanel({ priceBands, session, onChange }) {
 }
 
 // New-product form — any number of products per category, tier derived from price.
-function AddItemForm({ category, onAdded, session }) {
+function AddItemForm({ category, onAdded, session, cloneFrom }) {
   const meta = CATEGORY_META[category]
   const specFields = SPEC_FIELDS[category]
   const blank = () => {
+    if (cloneFrom) {
+      const f = {
+        sku: `${cloneFrom.sku} (copy)`, description: cloneFrom.description,
+        buying_price_kes: String(cloneFrom.buying_price_kes ?? ''),
+        unit_weight_kg: cloneFrom.unit_weight_kg != null ? String(cloneFrom.unit_weight_kg) : '',
+        capacity: cloneFrom[meta.capacityField] != null ? String(cloneFrom[meta.capacityField]) : '',
+      }
+      specFields.forEach(s => { f[s.key] = cloneFrom[s.key] != null ? String(cloneFrom[s.key]) : '' })
+      return f
+    }
     const f = { sku: '', description: '', buying_price_kes: '', unit_weight_kg: '', capacity: '' }
     specFields.forEach(s => { f[s.key] = '' })
     return f
@@ -398,6 +408,151 @@ function SerialsToggle({ roleKey, session }) {
   )
 }
 
+const ROLE_KEY_COLUMN = { panel: 'panel_role_key', inverter: 'inverter_role_key', battery: 'battery_role_key' }
+
+// Zoho-style item detail modal — Overview / Transactions / History, plus
+// Clone / Mark Active-Inactive / Delete. Layered on top of the existing
+// inline table editing rather than replacing it, since that already works.
+function ItemDetailModal({ row, category, onClose, onChanged, onCloneRequested, session }) {
+  const [tab, setTab] = useState('overview')
+  const [transactions, setTransactions] = useState(null)
+  const [loadingTx, setLoadingTx] = useState(false)
+  const [history, setHistory] = useState(null)
+  const [loadingHist, setLoadingHist] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [deleteBlocked, setDeleteBlocked] = useState(null)
+
+  useEffect(() => {
+    if (tab === 'transactions' && transactions === null) {
+      const col = ROLE_KEY_COLUMN[category]
+      if (!col) { setTransactions([]); return }
+      setLoadingTx(true)
+      supabase.from('quotation_requests')
+        .select('id, client_name, created_at, grand_total_kes, status')
+        .eq(col, row.role_key).order('created_at', { ascending: false }).limit(20)
+        .then(({ data }) => { setTransactions(data || []); setLoadingTx(false) })
+    }
+    if (tab === 'history' && history === null) {
+      setLoadingHist(true)
+      supabase.from('stock_movements')
+        .select('*').eq('role_key', row.role_key).order('created_at', { ascending: false }).limit(20)
+        .then(({ data }) => { setHistory(data || []); setLoadingHist(false) })
+    }
+  }, [tab, category, history, row.role_key, transactions])
+
+  async function toggleActive() {
+    const next = !(row.is_active !== false)
+    setBusy(true)
+    const { error } = await supabase.from('inventory_prices').update({ is_active: next }).eq('role_key', row.role_key)
+    setBusy(false)
+    if (!error) {
+      onChanged({ ...row, is_active: next })
+      logAdminAction(session, next ? 'item_reactivated' : 'item_marked_inactive', row.role_key, {})
+    }
+  }
+
+  async function handleDelete() {
+    setBusy(true)
+    const col = ROLE_KEY_COLUMN[category]
+    const [{ count: txCount }, { count: histCount }] = await Promise.all([
+      col ? supabase.from('quotation_requests').select('id', { count: 'exact', head: true }).eq(col, row.role_key) : Promise.resolve({ count: 0 }),
+      supabase.from('stock_movements').select('id', { count: 'exact', head: true }).eq('role_key', row.role_key),
+    ])
+    if ((txCount || 0) > 0 || (histCount || 0) > 0) {
+      setBusy(false)
+      setDeleteBlocked(`This item has ${txCount || 0} quote(s) and ${histCount || 0} stock change(s) on record — delete is blocked to protect that history. Use "Mark Inactive" instead.`)
+      return
+    }
+    const { error } = await supabase.from('inventory_prices').delete().eq('role_key', row.role_key)
+    setBusy(false)
+    if (!error) {
+      logAdminAction(session, 'item_deleted', row.role_key, { sku: row.sku })
+      onChanged(null)
+      onClose()
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="p-5 border-b border-gray-100 flex items-start justify-between">
+          <div>
+            <div className="text-xs font-mono text-gray-400">#{row.item_code ?? '—'} · {row.sku}</div>
+            <h3 className="font-black text-gray-800 text-lg">{row.description}</h3>
+            {row.is_active === false && <span className="text-xs font-bold bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">Inactive</span>}
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+        </div>
+
+        <div className="flex gap-1 px-5 pt-3 border-b border-gray-100">
+          {[['overview', 'Overview'], ['transactions', 'Transactions'], ['history', 'History']].map(([id, label]) => (
+            <button key={id} onClick={() => setTab(id)}
+              className={`px-3 py-2 text-sm font-bold border-b-2 transition ${tab === id ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="p-5">
+          {tab === 'overview' && (
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between"><span className="text-gray-400">Buying price</span><span className="font-bold">{formatKsh(row.buying_price_kes)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-400">Selling price</span><span className="font-bold text-emerald-700">{formatKsh(row.buying_price_kes * 1.35)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-400">Stock on hand</span><span className="font-bold">{row.stock_qty ?? 'Not tracked'}</span></div>
+              <div className="flex justify-between"><span className="text-gray-400">Supplier</span><span className="font-bold">{row.supplier || '—'}</span></div>
+              <div className="flex justify-between"><span className="text-gray-400">Status</span><span className="font-bold">{row.is_active === false ? 'Inactive' : 'Active'}{row.in_stock === false ? ' · Marked out of stock' : ''}</span></div>
+            </div>
+          )}
+          {tab === 'transactions' && (
+            loadingTx ? <div className="text-xs text-gray-400">Loading…</div> :
+            !transactions?.length ? <div className="text-xs text-gray-400 italic">No quotes have used this exact product yet (only tracked from when this feature shipped — 2026-07-04 onward).</div> :
+            <div className="space-y-2">
+              {transactions.map(t => (
+                <div key={t.id} className="flex justify-between text-sm border-b border-gray-50 pb-2">
+                  <div>
+                    <div className="font-semibold text-gray-700">{t.client_name || 'Unnamed'}</div>
+                    <div className="text-xs text-gray-400">{new Date(t.created_at).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' })} · {t.status}</div>
+                  </div>
+                  <div className="font-mono font-bold">{formatKsh(t.grand_total_kes)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {tab === 'history' && (
+            loadingHist ? <div className="text-xs text-gray-400">Loading…</div> :
+            !history?.length ? <div className="text-xs text-gray-400 italic">No stock changes logged yet.</div> :
+            <div className="space-y-1.5">
+              {history.map(h => (
+                <div key={h.id} className="flex justify-between text-sm">
+                  <span className={h.quantity_changed >= 0 ? 'text-green-700 font-bold' : 'text-red-700 font-bold'}>
+                    {h.quantity_changed >= 0 ? '+' : ''}{h.quantity_changed}
+                  </span>
+                  <span className="text-gray-400 text-xs">{h.reason || '—'}</span>
+                  <span className="text-gray-400 text-xs">{new Date(h.created_at).toLocaleDateString('en-KE', { day: '2-digit', month: 'short' })}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {deleteBlocked && <div className="mx-5 mb-3 bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{deleteBlocked}</div>}
+
+        <div className="p-5 border-t border-gray-100 flex flex-wrap gap-2">
+          <button onClick={() => onCloneRequested(row)} className="text-xs font-bold bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg transition">
+            Clone Item
+          </button>
+          <button onClick={toggleActive} disabled={busy} className="text-xs font-bold bg-amber-100 hover:bg-amber-200 text-amber-800 px-3 py-2 rounded-lg transition disabled:opacity-50">
+            {row.is_active === false ? 'Mark Active' : 'Mark Inactive'}
+          </button>
+          <button onClick={handleDelete} disabled={busy} className="text-xs font-bold bg-red-100 hover:bg-red-200 text-red-700 px-3 py-2 rounded-lg transition disabled:opacity-50 ml-auto">
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // AdminInventory keeps price bands in the same shape the DB rows already
 // have ({min_price, max_price}) rather than the [min,max] tuples used
 // elsewhere, since that's what's directly rendered/edited here.
@@ -432,6 +587,8 @@ function InventoryTable({ session }) {
   const [saved,   setSaved]   = useState({})
   const [loading, setLoading] = useState(true)
   const [addingTo, setAddingTo] = useState(null)  // which category's "+ Add Item" form is open
+  const [cloneSource, setCloneSource] = useState(null)  // row being cloned into the Add Item form, if any
+  const [viewingItem, setViewingItem] = useState(null)  // { row, category } for the detail modal
 
   // Stock qty + reorder point + supplier (+ specs, for product categories) —
   // edited together as one small form, separate from price since touched far less often.
@@ -600,15 +757,15 @@ function InventoryTable({ session }) {
           <div className="bg-gray-50 border-b border-gray-100 px-5 py-3 flex items-center justify-between">
             <h3 className="font-black text-gray-700 text-sm">{group.title}</h3>
             {group.category && (
-              <button onClick={() => setAddingTo(a => a === group.category ? null : group.category)}
+              <button onClick={() => { setAddingTo(a => a === group.category ? null : group.category); setCloneSource(null) }}
                 className="text-xs font-bold text-blue-600 hover:text-blue-800">
                 {addingTo === group.category ? '✕ Cancel' : '+ Add Item'}
               </button>
             )}
           </div>
           {group.category && addingTo === group.category && (
-            <AddItemForm category={group.category} session={session}
-              onAdded={row => setRows(p => ({ ...p, [row.role_key]: row }))} />
+            <AddItemForm category={group.category} session={session} cloneFrom={cloneSource}
+              onAdded={row => { setRows(p => ({ ...p, [row.role_key]: row })); setCloneSource(null) }} />
           )}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -633,11 +790,25 @@ function InventoryTable({ session }) {
                   const updated = row.updated_at
                     ? new Date(row.updated_at).toLocaleDateString('en-KE', { day:'2-digit', month:'short' })
                     : '—'
+                  const isInactive = row.is_active === false
                   return (
-                    <tr key={item.key} className={`hover:bg-gray-50 transition ${!inStock ? 'opacity-50' : ''}`}>
+                    <tr key={item.key} className={`hover:bg-gray-50 transition ${!inStock || isInactive ? 'opacity-50' : ''}`}>
                       <td className="px-5 py-3">
-                        <div className="font-semibold text-gray-800 text-sm">{item.label}</div>
-                        <div className="text-xs text-gray-400">{item.spec}</div>
+                        {group.category ? (
+                          <button onClick={() => setViewingItem({ row, category: group.category })} className="text-left">
+                            <div className="font-semibold text-gray-800 text-sm hover:text-blue-600 transition">
+                              {row.item_code != null && <span className="text-gray-300 font-mono mr-1">#{row.item_code}</span>}
+                              {item.label}
+                              {isInactive && <span className="ml-1.5 text-[10px] font-bold bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full align-middle">Inactive</span>}
+                            </div>
+                            <div className="text-xs text-gray-400">{item.spec}</div>
+                          </button>
+                        ) : (
+                          <>
+                            <div className="font-semibold text-gray-800 text-sm">{item.label}</div>
+                            <div className="text-xs text-gray-400">{item.spec}</div>
+                          </>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right">
                         {isEdit ? (
@@ -748,6 +919,27 @@ function InventoryTable({ session }) {
           </div>
         </div>
       ))}
+
+      {viewingItem && (
+        <ItemDetailModal
+          row={viewingItem.row}
+          category={viewingItem.category}
+          session={session}
+          onClose={() => setViewingItem(null)}
+          onChanged={updatedRow => {
+            if (updatedRow === null) {
+              setRows(p => { const n = { ...p }; delete n[viewingItem.row.role_key]; return n })
+            } else {
+              setRows(p => ({ ...p, [updatedRow.role_key]: updatedRow }))
+            }
+          }}
+          onCloneRequested={sourceRow => {
+            setCloneSource(sourceRow)
+            setAddingTo(viewingItem.category)
+            setViewingItem(null)
+          }}
+        />
+      )}
     </div>
   )
 }

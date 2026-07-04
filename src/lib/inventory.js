@@ -25,7 +25,9 @@ function toProduct(row) {
     cycleLife:        row.cycle_life   != null ? Number(row.cycle_life) : undefined,
     dodPct:           row.dod_pct      != null ? Number(row.dod_pct)    : undefined,
     imageUrl:         row.image_url || undefined,
+    itemCode:         row.item_code != null ? Number(row.item_code) : undefined,
     inStock:          row.in_stock !== false,
+    isActive:         row.is_active !== false,
   }
 }
 
@@ -62,9 +64,12 @@ export async function fetchInventory() {
 
     // Any number of products per category — tier is derived from price, not
     // stored, so this reflects live price_bands even if they've been edited.
+    // Inactive items ("Mark as Inactive", not just out-of-stock) are excluded
+    // from customer-facing quoting entirely, same as Zoho's item architecture.
     const products = { panel: [], inverter: [], battery: [] }
     rows.forEach(row => {
       if (!(row.category in products)) return
+      if (row.is_active === false) return
       const product = toProduct(row)
       product.tier = deriveTier(row.category, product.cost, priceBands)
       products[row.category].push(product)

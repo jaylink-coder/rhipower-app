@@ -333,6 +333,9 @@ export default function Step3_Results({
         logistics_kes:   results.totalLogistics,
         grand_total_kes: results.grandTotal,
         user_id:         customerUser?.id || null,
+        panel_role_key:    results.selectedProducts?.panel?.roleKey    || null,
+        inverter_role_key: results.selectedProducts?.inverter?.roleKey || null,
+        battery_role_key:  results.selectedProducts?.battery?.roleKey  || null,
         raw_state:       { siteConfig, customAppliances, quantities, clientProfile, backupDays },
       }).select('id').single()
       if (data?.id) setQuotationId(data.id)
