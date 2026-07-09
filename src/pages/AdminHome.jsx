@@ -152,6 +152,7 @@ export default function AdminHome({ session, onNavigate }) {
               <button onClick={() => onNavigate('purchasing')} className="text-left bg-gray-50 hover:bg-gray-100 rounded-xl p-3 text-sm font-bold text-gray-700 transition">🧾 Purchase Orders</button>
               <button onClick={() => onNavigate('salesorders')} className="text-left bg-gray-50 hover:bg-gray-100 rounded-xl p-3 text-sm font-bold text-gray-700 transition">📑 Sales Orders</button>
               <button onClick={() => onNavigate('invoices')} className="text-left bg-gray-50 hover:bg-gray-100 rounded-xl p-3 text-sm font-bold text-gray-700 transition">💵 Invoices</button>
+              <button onClick={() => onNavigate('reports')} className="text-left bg-gray-50 hover:bg-gray-100 rounded-xl p-3 text-sm font-bold text-gray-700 transition">📊 Reports</button>
               <button onClick={() => onNavigate('customers')} className="text-left bg-gray-50 hover:bg-gray-100 rounded-xl p-3 text-sm font-bold text-gray-700 transition">👥 View Customers</button>
               <a href="https://supabase.com/dashboard/project/qsuisdtnzrxrdqcqbvem" target="_blank" rel="noreferrer"
                 className="text-left bg-gray-50 hover:bg-gray-100 rounded-xl p-3 text-sm font-bold text-gray-700 transition">🗄️ Open Supabase</a>

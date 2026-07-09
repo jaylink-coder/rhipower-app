@@ -119,15 +119,25 @@ function ReceiveLineRow({ po, line, item, session, business, onReceived }) {
     const { error } = await supabase.from('purchase_order_lines')
       .update({ qty_received: newQtyReceived }).eq('id', line.id)
     if (!error) {
-      const newStock = (item?.stock_qty || 0) + n
-      await supabase.from('inventory_prices').update({ stock_qty: newStock, updated_at: new Date().toISOString() }).eq('role_key', line.role_key)
+      const oldStock = item?.stock_qty || 0
+      const newStock = oldStock + n
+      // Weighted-average cost, not FIFO — matches this codebase's single-
+      // location, no-lot-tracking design (see migration 019's comment).
+      const oldAvg = item?.weighted_avg_cost_kes
+      const unitCost = Number(line.unit_cost_kes || 0)
+      const newAvg = (oldAvg != null && oldStock > 0)
+        ? Math.round(((oldAvg * oldStock) + (unitCost * n)) / newStock)
+        : unitCost
+      await supabase.from('inventory_prices')
+        .update({ stock_qty: newStock, weighted_avg_cost_kes: newAvg, updated_at: new Date().toISOString() })
+        .eq('role_key', line.role_key)
       await logStockMovement({
         roleKey: line.role_key, quantityChanged: n, session,
         movementType: 'purchase', sourceType: 'purchase_order', sourceId: po.id,
         reason: `Received against ${formatDocNumber(business.poPrefix, po.po_number)}`,
       })
       logAdminAction(session, 'po_line_received', po.id, { role_key: line.role_key, qty: n })
-      onReceived({ lineId: line.id, qtyReceived: newQtyReceived, roleKey: line.role_key, newStock })
+      onReceived({ lineId: line.id, qtyReceived: newQtyReceived, roleKey: line.role_key, newStock, newAvg })
     }
     setBusy(false)
   }
@@ -171,7 +181,7 @@ export default function AdminPurchaseOrders({ session, business = BUSINESS_FALLB
     const [{ data: poRows }, { data: supplierRows }, { data: itemRows }] = await Promise.all([
       supabase.from('purchase_orders').select('*, purchase_order_lines(*)').order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').order('name'),
-      supabase.from('inventory_prices').select('role_key, item_code, description, buying_price_kes, stock_qty, is_active'),
+      supabase.from('inventory_prices').select('role_key, item_code, description, buying_price_kes, stock_qty, is_active, weighted_avg_cost_kes'),
     ])
     setPos(poRows || [])
     setSuppliers(supplierRows || [])
@@ -216,8 +226,8 @@ export default function AdminPurchaseOrders({ session, business = BUSINESS_FALLB
     logAdminAction(session, 'po_status_change', po.id, { status })
   }
 
-  function handleLineReceived(po, { lineId, qtyReceived, roleKey, newStock }) {
-    setItems(p => ({ ...p, [roleKey]: { ...p[roleKey], stock_qty: newStock } }))
+  function handleLineReceived(po, { lineId, qtyReceived, roleKey, newStock, newAvg }) {
+    setItems(p => ({ ...p, [roleKey]: { ...p[roleKey], stock_qty: newStock, weighted_avg_cost_kes: newAvg } }))
     setPos(p => p.map(x => {
       if (x.id !== po.id) return x
       const lines = x.purchase_order_lines.map(l => l.id === lineId ? { ...l, qty_received: qtyReceived } : l)

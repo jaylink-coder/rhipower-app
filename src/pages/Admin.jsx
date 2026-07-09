@@ -15,6 +15,7 @@ import AdminPurchaseOrders from './AdminPurchaseOrders.jsx'
 import AdminSalesOrders from './AdminSalesOrders.jsx'
 import AdminInvoices from './AdminInvoices.jsx'
 import AdminSettings from './AdminSettings.jsx'
+import AdminReports from './AdminReports.jsx'
 import { fetchOrgSettings, FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
 
 // KRA VAT categories — 'standard' (taxed at the org's VAT rate), 'zero_rated'
@@ -988,6 +989,7 @@ const SECTIONS = [
   { id: 'salesorders', label: '📑 Sales Orders' },
   { id: 'invoices',    label: '💵 Invoices' },
   { id: 'customers',   label: '👥 Customers' },
+  { id: 'reports',     label: '📊 Reports' },
   { id: 'settings',    label: '⚙️ Settings' },
 ]
 
@@ -1102,6 +1104,7 @@ export default function Admin({ onBack }) {
           {activeTab === 'salesorders' && <AdminSalesOrders session={session} onNavigate={navigateTo} focusId={focusId} business={business} />}
           {activeTab === 'invoices'    && <AdminInvoices session={session} onNavigate={navigateTo} focusId={focusId} business={business} />}
           {activeTab === 'customers'   && <AdminCustomers session={session} />}
+          {activeTab === 'reports'     && <AdminReports session={session} />}
           {activeTab === 'settings'    && <AdminSettings session={session} onSettingsChanged={setBusiness} />}
         </div>
       </div>
