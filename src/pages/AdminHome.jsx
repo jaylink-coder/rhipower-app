@@ -33,6 +33,10 @@ const ACTION_LABELS = {
   sales_order_confirmed: p => `Confirmed a sales order — stock reserved (${p.target})`,
   sales_order_cancelled: p => `Cancelled a sales order (${p.target})`,
   sales_order_line_fulfilled: p => `Fulfilled a sales order line (${p.target})`,
+  invoice_generated:     p => `Generated an invoice (${p.target})`,
+  invoice_sent:          p => `Marked an invoice as sent (${p.target})`,
+  invoice_voided:        p => `Voided an invoice (${p.target})`,
+  payment_recorded:      p => `Recorded a payment (${p.target})`,
 }
 
 function timeAgo(iso) {
@@ -59,7 +63,8 @@ export default function AdminHome({ session, onNavigate }) {
       supabase.from('admin_audit_log').select('*').order('created_at', { ascending: false }).limit(15),
       supabase.from('purchase_orders').select('status'),
       supabase.from('sales_orders').select('status'),
-    ]).then(([leadsRes, custRes, invRes, logRes, poRes, soRes]) => {
+      supabase.from('invoices').select('status, balance_due_kes'),
+    ]).then(([leadsRes, custRes, invRes, logRes, poRes, soRes, invoicesRes]) => {
       const leads = leadsRes.data || []
       const totalLeads   = leads.length
       const newLeads     = leads.filter(l => (l.status || 'new') === 'new').length
@@ -71,12 +76,15 @@ export default function AdminHome({ session, onNavigate }) {
 
       const openPOs = (poRes.data || []).filter(p => ['draft', 'ordered', 'partially_received'].includes(p.status)).length
       const openSOs = (soRes.data || []).filter(s => ['draft', 'confirmed', 'partially_fulfilled'].includes(s.status)).length
+      const unpaidInvoices = (invoicesRes.data || []).filter(i => ['sent', 'partially_paid', 'overdue'].includes(i.status))
+      const unpaidTotal = unpaidInvoices.reduce((s, i) => s + Number(i.balance_due_kes || 0), 0)
 
       setStats({
         totalLeads, newLeads, pipelineVal, installedRev,
         totalCustomers: custRes.count || 0,
         totalProducts: products.length,
         openPOs, openSOs,
+        unpaidInvoiceCount: unpaidInvoices.length, unpaidTotal,
       })
       setLowStock(low)
       setActivity(logRes.data || [])
@@ -98,6 +106,7 @@ export default function AdminHome({ session, onNavigate }) {
     { label: 'Low Stock Alerts',val: lowStock.length,                sub: lowStock.length ? 'needs reordering' : 'all good', color: lowStock.length ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-500 border-gray-200', nav: 'inventory' },
     { label: 'Open POs',        val: stats.openPOs,                  sub: 'purchase orders in progress',        color: 'bg-cyan-50 text-cyan-700 border-cyan-200',      nav: 'purchasing' },
     { label: 'Open Sales Orders', val: stats.openSOs,                sub: 'awaiting fulfillment',                color: 'bg-indigo-50 text-indigo-700 border-indigo-200', nav: 'salesorders' },
+    { label: 'Unpaid Invoices', val: stats.unpaidInvoiceCount,        sub: formatKsh(stats.unpaidTotal || 0),     color: 'bg-pink-50 text-pink-700 border-pink-200',      nav: 'invoices' },
   ]
 
   return (
@@ -142,6 +151,7 @@ export default function AdminHome({ session, onNavigate }) {
               <button onClick={() => onNavigate('inventory')} className="text-left bg-gray-50 hover:bg-gray-100 rounded-xl p-3 text-sm font-bold text-gray-700 transition">📦 Manage Inventory</button>
               <button onClick={() => onNavigate('purchasing')} className="text-left bg-gray-50 hover:bg-gray-100 rounded-xl p-3 text-sm font-bold text-gray-700 transition">🧾 Purchase Orders</button>
               <button onClick={() => onNavigate('salesorders')} className="text-left bg-gray-50 hover:bg-gray-100 rounded-xl p-3 text-sm font-bold text-gray-700 transition">📑 Sales Orders</button>
+              <button onClick={() => onNavigate('invoices')} className="text-left bg-gray-50 hover:bg-gray-100 rounded-xl p-3 text-sm font-bold text-gray-700 transition">💵 Invoices</button>
               <button onClick={() => onNavigate('customers')} className="text-left bg-gray-50 hover:bg-gray-100 rounded-xl p-3 text-sm font-bold text-gray-700 transition">👥 View Customers</button>
               <a href="https://supabase.com/dashboard/project/qsuisdtnzrxrdqcqbvem" target="_blank" rel="noreferrer"
                 className="text-left bg-gray-50 hover:bg-gray-100 rounded-xl p-3 text-sm font-bold text-gray-700 transition">🗄️ Open Supabase</a>

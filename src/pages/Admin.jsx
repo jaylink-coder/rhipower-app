@@ -13,6 +13,7 @@ import { logStockMovement } from '../lib/inventory.js'
 import AdminSuppliers from './AdminSuppliers.jsx'
 import AdminPurchaseOrders from './AdminPurchaseOrders.jsx'
 import AdminSalesOrders from './AdminSalesOrders.jsx'
+import AdminInvoices from './AdminInvoices.jsx'
 
 // Panel/Inverter/Battery are no longer fixed 3-slot groups — any number of
 // products can exist per category, and tier is derived from price, not
@@ -955,6 +956,7 @@ const SECTIONS = [
   { id: 'suppliers',   label: '🏭 Suppliers' },
   { id: 'purchasing',  label: '🧾 Purchase Orders' },
   { id: 'salesorders', label: '📑 Sales Orders' },
+  { id: 'invoices',    label: '💵 Invoices' },
   { id: 'customers',   label: '👥 Customers' },
 ]
 
@@ -1052,6 +1054,7 @@ export default function Admin({ onBack }) {
           {activeTab === 'suppliers'   && <AdminSuppliers session={session} />}
           {activeTab === 'purchasing'  && <AdminPurchaseOrders session={session} />}
           {activeTab === 'salesorders' && <AdminSalesOrders session={session} />}
+          {activeTab === 'invoices'    && <AdminInvoices session={session} />}
           {activeTab === 'customers'   && <AdminCustomers session={session} />}
         </div>
       </div>

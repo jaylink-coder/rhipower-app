@@ -7,4 +7,7 @@ export const BUSINESS = {
   email:     'jaylinkpowersystems@gmail.com',
   city:      'Nairobi, Kenya',
   tagline:   'Smart Solar & Energy Storage Engineering Platform',
+  // A real tax invoice should show a KRA PIN — fill this in once you have
+  // one handy; invoice PDFs simply omit the line while it's blank.
+  kraPin:    '',
 }

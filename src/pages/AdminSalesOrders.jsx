@@ -10,6 +10,7 @@ import { supabase } from '../lib/supabase.js'
 import { formatKsh } from '../lib/calculator.js'
 import { logAdminAction } from '../lib/auditLog.js'
 import { logStockMovement } from '../lib/inventory.js'
+import { generateInvoiceFromSalesOrder } from '../lib/invoices.js'
 
 const STATUS_OPTIONS = [
   { value: 'draft',                label: 'Draft',                color: 'bg-gray-100  text-gray-600'  },
@@ -68,26 +69,45 @@ function FulfillLineRow({ so, line, item, session, onFulfilled }) {
 export default function AdminSalesOrders({ session }) {
   const [sos,      setSos]      = useState([])
   const [items,    setItems]    = useState({})
+  const [invoices, setInvoices] = useState({})  // sales_order_id -> invoices row
   const [loading,  setLoading]  = useState(true)
   const [filter,   setFilter]   = useState('all')
   const [expanded, setExpanded] = useState(null)
   const [confirmWarnings, setConfirmWarnings] = useState({})
   const [busyConfirm, setBusyConfirm] = useState({})
   const [busyCancel,  setBusyCancel]  = useState({})
+  const [busyInvoice, setBusyInvoice] = useState({})
+  const [invoiceError, setInvoiceError] = useState({})
 
   useEffect(() => { load() }, [])
 
   async function load() {
     setLoading(true)
-    const [{ data: soRows }, { data: itemRows }] = await Promise.all([
+    const [{ data: soRows }, { data: itemRows }, { data: invRows }] = await Promise.all([
       supabase.from('sales_orders').select('*, sales_order_lines(*)').order('created_at', { ascending: false }),
       supabase.from('inventory_prices').select('role_key, description, stock_qty, is_active'),
+      supabase.from('invoices').select('id, sales_order_id, invoice_number, status'),
     ])
     setSos(soRows || [])
     const m = {}
     ;(itemRows || []).forEach(r => { m[r.role_key] = r })
     setItems(m)
+    const inv = {}
+    ;(invRows || []).forEach(r => { inv[r.sales_order_id] = r })
+    setInvoices(inv)
     setLoading(false)
+  }
+
+  async function handleGenerateInvoice(so) {
+    setBusyInvoice(p => ({ ...p, [so.id]: true }))
+    setInvoiceError(p => { const n = { ...p }; delete n[so.id]; return n })
+    try {
+      const invoice = await generateInvoiceFromSalesOrder(so, session)
+      setInvoices(p => ({ ...p, [so.id]: invoice }))
+    } catch (err) {
+      setInvoiceError(p => ({ ...p, [so.id]: err.message || 'Failed to generate invoice.' }))
+    }
+    setBusyInvoice(p => ({ ...p, [so.id]: false }))
   }
 
   function poNumber(so) { return `SO-${String(so.so_number).padStart(4, '0')}` }
@@ -238,6 +258,8 @@ export default function AdminSalesOrders({ session }) {
                   </div>
                 )}
 
+                {invoiceError[so.id] && <div className="text-xs text-red-700 font-semibold">{invoiceError[so.id]}</div>}
+
                 <div className="flex gap-2 flex-wrap">
                   {so.status === 'draft' && (
                     <button onClick={() => confirmSO(so)} disabled={busyConfirm[so.id]}
@@ -250,6 +272,18 @@ export default function AdminSalesOrders({ session }) {
                       className="text-xs font-bold bg-red-100 hover:bg-red-200 text-red-700 px-3 py-2 rounded-lg transition disabled:opacity-50">
                       {busyCancel[so.id] ? 'Cancelling…' : 'Cancel Order'}
                     </button>
+                  )}
+                  {so.status !== 'draft' && so.status !== 'cancelled' && (
+                    invoices[so.id] ? (
+                      <span className="text-xs font-bold text-purple-700 bg-purple-50 px-3 py-2 rounded-lg">
+                        📄 INV-{invoices[so.id].invoice_number} created — {invoices[so.id].status.replace(/_/g, ' ')} (see Invoices tab)
+                      </span>
+                    ) : (
+                      <button onClick={() => handleGenerateInvoice(so)} disabled={busyInvoice[so.id]}
+                        className="text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded-lg transition disabled:opacity-50">
+                        {busyInvoice[so.id] ? 'Generating…' : '📄 Generate Invoice'}
+                      </button>
+                    )
                   )}
                 </div>
               </div>
