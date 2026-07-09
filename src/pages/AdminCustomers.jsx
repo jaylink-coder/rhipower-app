@@ -276,6 +276,11 @@ export default function AdminCustomers({ session, onNavigate, business = BUSINES
   const [loading,    setLoading]  = useState(true)
   const [toggling,   setToggling] = useState({})
   const [viewing,    setViewing]  = useState(null)
+  const [adding,     setAdding]   = useState(false)
+  const [newEmail,    setNewEmail]    = useState('')
+  const [newFullName, setNewFullName] = useState('')
+  const [inviting,    setInviting]    = useState(false)
+  const [inviteMsg,   setInviteMsg]   = useState(null)
 
   useEffect(() => { load() }, [])
 
@@ -310,10 +315,50 @@ export default function AdminCustomers({ session, onNavigate, business = BUSINES
     }
   }
 
+  async function inviteCustomer() {
+    if (!newEmail.trim()) return
+    setInviting(true); setInviteMsg(null)
+    const { data, error } = await supabase.functions.invoke('invite-customer', {
+      body: { email: newEmail.trim(), fullName: newFullName.trim() },
+    })
+    setInviting(false)
+    if (error || data?.error) {
+      setInviteMsg({ ok: false, text: data?.error || error.message || 'Invite failed.' })
+    } else {
+      setInviteMsg({ ok: true, text: data.message })
+      setNewEmail(''); setNewFullName('')
+      load()
+    }
+  }
+
   if (loading) return <div className="flex items-center justify-center py-20 text-gray-400">Loading customers…</div>
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500">
+          Accounts appear here from self-signup, or add one directly if a customer signed up isn't practical (e.g. a walk-in or phone order).
+        </p>
+        <button onClick={() => { setAdding(a => !a); setInviteMsg(null) }} className="text-xs font-bold text-blue-600 hover:text-blue-800 shrink-0 ml-3">
+          {adding ? '✕ Cancel' : '+ Add Customer'}
+        </button>
+      </div>
+
+      {adding && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <input placeholder="Email" className="border border-gray-200 rounded-lg px-3 py-2 text-sm" value={newEmail} onChange={e => setNewEmail(e.target.value)} />
+            <input placeholder="Full name (optional)" className="border border-gray-200 rounded-lg px-3 py-2 text-sm" value={newFullName} onChange={e => setNewFullName(e.target.value)} />
+          </div>
+          {inviteMsg && <div className={`text-xs font-semibold ${inviteMsg.ok ? 'text-green-700' : 'text-red-700'}`}>{inviteMsg.text}</div>}
+          <button onClick={inviteCustomer} disabled={inviting || !newEmail.trim()}
+            className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition disabled:opacity-50">
+            {inviting ? 'Sending…' : 'Send Invite'}
+          </button>
+          <p className="text-xs text-blue-600">Sends a Supabase Auth invite email — the customer sets their own password from that email, and the account appears in the list right away.</p>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <div className="rounded-2xl p-4 bg-blue-50 text-blue-800">
           <div className="text-xs font-bold uppercase tracking-wider opacity-60">Total Accounts</div>

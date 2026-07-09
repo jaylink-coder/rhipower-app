@@ -26,6 +26,19 @@ supabase functions deploy invite-admin
 No new secrets — reuses `SUPABASE_URL`/`SUPABASE_ANON_KEY`/`SUPABASE_SERVICE_ROLE_KEY`,
 which Supabase auto-provides to every function in the project already.
 
+## invite-customer
+Lets an admin add a customer manually from Customers -> "+ Add Customer", instead
+of relying entirely on self-signup. Same caller-verification pattern as
+invite-admin, but doesn't insert into `customer_profiles` itself — migration 003's
+`handle_new_customer` trigger already does that automatically on every new
+auth.users row.
+
+```
+supabase functions deploy invite-customer
+```
+
+No new secrets, same reasoning as invite-admin.
+
 ## M-Pesa deposit collection (mpesa-stk-push, mpesa-callback, mpesa-status)
 Lets a client pay a booking deposit via Safaricom Daraja STK Push. See
 `supabase/migrations/002_mpesa_deposits.sql` for the `deposit_transactions` table.
