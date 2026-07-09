@@ -2,7 +2,10 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { formatKsh } from '../lib/calculator.js'
 import { logAdminAction } from '../lib/auditLog.js'
+import { convertQuoteToSalesOrder } from '../lib/salesOrders.js'
 import SiteVisitsPanel from '../components/SiteVisitsPanel.jsx'
+
+const SO_ELIGIBLE_STATUSES = ['proposal_accepted', 'installed']
 
 const STATUS_OPTIONS = [
   { value: 'new',               label: 'New',               color: 'bg-blue-100   text-blue-800'   },
@@ -20,21 +23,25 @@ const PROF_LABELS = { homeowner: '🏠 Homeowner', diy: '🔌 DIY', professional
 export default function AdminLeads({ session }) {
   const [leads,         setLeads]         = useState([])
   const [deposits,      setDeposits]      = useState({})   // quotation_id -> deposit_transactions row
+  const [salesOrders,   setSalesOrders]   = useState({})   // quotation_id -> sales_orders row
   const [loading,       setLoading]       = useState(true)
   const [filter,        setFilter]        = useState('all')
   const [expanded,      setExpanded]      = useState(null)
   const [notes,         setNotes]         = useState({})
   const [savingNote,    setSavingNote]    = useState({})
   const [savingStatus,  setSavingStatus]  = useState({})
+  const [converting,    setConverting]    = useState({})
+  const [convertError,  setConvertError]  = useState({})
 
   useEffect(() => { loadLeads() }, [])
 
   async function loadLeads() {
     setLoading(true)
-    const [{ data }, { data: depositRows }] = await Promise.all([
+    const [{ data }, { data: depositRows }, { data: soRows }] = await Promise.all([
       supabase.from('quotation_requests').select('*').order('created_at', { ascending: false }),
       supabase.from('deposit_transactions').select('quotation_id, amount_kes, status, mpesa_receipt')
         .not('quotation_id', 'is', null),
+      supabase.from('sales_orders').select('id, quotation_id, so_number, status').not('quotation_id', 'is', null),
     ])
     if (data) {
       setLeads(data)
@@ -48,7 +55,24 @@ export default function AdminLeads({ session }) {
       depositRows.forEach(r => { d[r.quotation_id] = r })
       setDeposits(d)
     }
+    if (soRows) {
+      const s = {}
+      soRows.forEach(r => { s[r.quotation_id] = r })
+      setSalesOrders(s)
+    }
     setLoading(false)
+  }
+
+  async function handleConvert(lead) {
+    setConverting(p => ({ ...p, [lead.id]: true }))
+    setConvertError(p => { const n = { ...p }; delete n[lead.id]; return n })
+    try {
+      const so = await convertQuoteToSalesOrder(lead, session)
+      setSalesOrders(p => ({ ...p, [lead.id]: so }))
+    } catch (err) {
+      setConvertError(p => ({ ...p, [lead.id]: err.message || 'Conversion failed.' }))
+    }
+    setConverting(p => ({ ...p, [lead.id]: false }))
   }
 
   async function updateStatus(id, status) {
@@ -213,6 +237,25 @@ export default function AdminLeads({ session }) {
                       {' — '}{formatKsh(deposits[lead.id].amount_kes)}
                     </span>
                     {deposits[lead.id].mpesa_receipt && <span className="font-mono">{deposits[lead.id].mpesa_receipt}</span>}
+                  </div>
+                )}
+
+                {/* Sales Order conversion — manual, never auto-triggered by the status
+                    dropdown above, since confirming a Sales Order reserves real stock. */}
+                {SO_ELIGIBLE_STATUSES.includes(lead.status) && (
+                  <div className="rounded-xl p-3 text-xs font-semibold bg-purple-50 border border-purple-200 text-purple-800 flex items-center justify-between flex-wrap gap-2">
+                    {salesOrders[lead.id] ? (
+                      <span>📑 SO-{String(salesOrders[lead.id].so_number).padStart(4, '0')} created — status: {salesOrders[lead.id].status.replace(/_/g, ' ')} (see Sales Orders tab)</span>
+                    ) : (
+                      <>
+                        <span>No Sales Order yet for this quote.</span>
+                        <button onClick={() => handleConvert(lead)} disabled={converting[lead.id]}
+                          className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition disabled:opacity-50">
+                          {converting[lead.id] ? 'Converting…' : '📑 Convert to Sales Order'}
+                        </button>
+                      </>
+                    )}
+                    {convertError[lead.id] && <div className="w-full text-red-700">{convertError[lead.id]}</div>}
                   </div>
                 )}
 

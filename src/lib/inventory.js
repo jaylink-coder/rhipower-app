@@ -7,7 +7,7 @@ import { deriveTier } from './tierProducts.js'
 
 export const FALLBACK = { products: DEFAULT_PRODUCTS, priceBands: DEFAULT_PRICE_BANDS, zones: DEFAULT_ZONES }
 
-function toProduct(row) {
+export function toProduct(row) {
   return {
     roleKey:          row.role_key,
     sku:              row.sku,
