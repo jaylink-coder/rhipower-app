@@ -1,15 +1,178 @@
 // Admin-side customer directory — lists everyone with a saved account,
 // mirroring HustleSasa's admin/users pattern but scaled to what RhiPower
 // actually needs (no roles/rosters/watchlists, just accounts + their quotes).
+//
+// CustomerDetailModal adds a real transaction history view (Overview/Leads &
+// Quotes/Sales Orders/Invoices), modeled on the customer detail pane in the
+// user's real Zoho Invoice account — but scoped to data RhiPower actually
+// has: no Comments/Mails tabs (no internal notes field or email system for
+// customers), no per-customer "Configure Portal" (there's already a single
+// org-wide signup toggle in Settings -> Customer Portal), no Merge/Clone
+// (edge cases not worth the complexity at this scale). Phone/address are
+// read from the customer's most recent quote rather than stored on
+// customer_profiles itself — that table intentionally stays thin (id,
+// email, full_name, status); a customer's contact details already live on
+// every quote they've submitted, so duplicating them here would just be
+// another place for that data to go stale.
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { formatKsh } from '../lib/calculator.js'
 import { logAdminAction } from '../lib/auditLog.js'
+import { formatDocNumber } from '../lib/docNumbers.js'
+import { FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
 
-export default function AdminCustomers({ session }) {
+const LEAD_STATUS_COLORS = {
+  new: 'bg-blue-100 text-blue-800', contacted: 'bg-yellow-100 text-yellow-800', site_surveyed: 'bg-purple-100 text-purple-800',
+  proposal_accepted: 'bg-orange-100 text-orange-800', installed: 'bg-green-100 text-green-800', lost: 'bg-gray-100 text-gray-500',
+}
+const SO_STATUS_COLORS = {
+  draft: 'bg-gray-100 text-gray-600', confirmed: 'bg-blue-100 text-blue-800', partially_fulfilled: 'bg-amber-100 text-amber-800',
+  fulfilled: 'bg-green-100 text-green-800', cancelled: 'bg-red-100 text-red-600',
+}
+const INV_STATUS_COLORS = {
+  draft: 'bg-gray-100 text-gray-600', sent: 'bg-blue-100 text-blue-800', partially_paid: 'bg-amber-100 text-amber-800',
+  paid: 'bg-green-100 text-green-800', void: 'bg-gray-200 text-gray-500',
+}
+
+function CustomerDetailModal({ row, onClose, onNavigate, business, onToggled, toggling }) {
+  const [tab, setTab] = useState('overview')
+  const [leads,       setLeads]       = useState(null)
+  const [salesOrders, setSalesOrders] = useState(null)
+  const [invoices,    setInvoices]    = useState(null)
+
+  useEffect(() => {
+    Promise.all([
+      supabase.from('quotation_requests').select('id, status, grand_total_kes, created_at, client_phone, site_address')
+        .eq('user_id', row.id).order('created_at', { ascending: false }),
+      supabase.from('sales_orders').select('id, so_number, status, total_kes, created_at')
+        .eq('customer_user_id', row.id).order('created_at', { ascending: false }),
+      supabase.from('invoices').select('id, invoice_number, issue_date, status, total_kes, amount_paid_kes, balance_due_kes')
+        .eq('customer_user_id', row.id).order('created_at', { ascending: false }),
+    ]).then(([leadsRes, soRes, invRes]) => {
+      setLeads(leadsRes.data || [])
+      setSalesOrders(soRes.data || [])
+      setInvoices(invRes.data || [])
+    })
+  }, [row.id])
+
+  const latestQuote = leads?.[0]
+  const nonVoidInvoices = (invoices || []).filter(i => i.status !== 'void')
+  const totalInvoiced = nonVoidInvoices.reduce((s, i) => s + Number(i.total_kes || 0), 0)
+  const totalPaid      = nonVoidInvoices.reduce((s, i) => s + Number(i.amount_paid_kes || 0), 0)
+  const totalDue        = nonVoidInvoices.reduce((s, i) => s + Number(i.balance_due_kes || 0), 0)
+
+  function jump(tabId, id) {
+    onNavigate?.(tabId, id)
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="p-5 border-b border-gray-100 flex items-start justify-between">
+          <div>
+            <h3 className="font-black text-gray-800 text-lg">{row.full_name || 'Unnamed'}</h3>
+            <div className="text-xs text-gray-400">{row.email}{latestQuote?.client_phone ? ` · ${latestQuote.client_phone}` : ''}</div>
+            {latestQuote?.site_address && <div className="text-xs text-gray-400">{latestQuote.site_address}</div>}
+            {row.status === 'suspended' && <span className="inline-block mt-1 text-xs font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">Suspended</span>}
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+        </div>
+
+        <div className="flex gap-1 px-5 pt-3 border-b border-gray-100">
+          {[['overview', 'Overview'], ['leads', `Leads & Quotes${leads ? ` (${leads.length})` : ''}`], ['salesorders', `Sales Orders${salesOrders ? ` (${salesOrders.length})` : ''}`], ['invoices', `Invoices${invoices ? ` (${invoices.length})` : ''}`]].map(([id, label]) => (
+            <button key={id} onClick={() => setTab(id)}
+              className={`px-3 py-2 text-sm font-bold border-b-2 transition ${tab === id ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="p-5">
+          {tab === 'overview' && (
+            <div className="space-y-4">
+              <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 space-y-1.5 text-sm">
+                <div className="font-black text-gray-700 text-xs uppercase tracking-wider mb-1">Receivables</div>
+                <div className="flex justify-between"><span className="text-gray-400">Total Invoiced</span><span className="font-bold">{formatKsh(totalInvoiced)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">Paid to Date</span><span className="font-bold text-green-700">{formatKsh(totalPaid)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">Outstanding Balance</span><span className={`font-bold ${totalDue > 0 ? 'text-red-700' : 'text-gray-400'}`}>{formatKsh(totalDue)}</span></div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="bg-blue-50 rounded-xl p-3"><div className="text-lg font-black text-blue-800">{leads?.length ?? '…'}</div><div className="text-xs text-blue-600">Leads/Quotes</div></div>
+                <div className="bg-purple-50 rounded-xl p-3"><div className="text-lg font-black text-purple-800">{salesOrders?.length ?? '…'}</div><div className="text-xs text-purple-600">Sales Orders</div></div>
+                <div className="bg-pink-50 rounded-xl p-3"><div className="text-lg font-black text-pink-800">{invoices?.length ?? '…'}</div><div className="text-xs text-pink-600">Invoices</div></div>
+              </div>
+              <div className="flex justify-between items-center pt-2">
+                <span className="text-xs text-gray-400">Joined {new Date(row.created_at).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                <button onClick={() => onToggled(row)} disabled={toggling}
+                  className="text-xs font-bold px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-100 transition disabled:opacity-50">
+                  {toggling ? '…' : row.status === 'suspended' ? 'Reactivate' : 'Suspend'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {tab === 'leads' && (
+            !leads ? <div className="text-xs text-gray-400">Loading…</div> :
+            !leads.length ? <div className="text-xs text-gray-400 italic">No quotes submitted yet.</div> :
+            <div className="space-y-2">
+              {leads.map(l => (
+                <button key={l.id} onClick={() => jump('leads', l.id)} className="w-full flex justify-between text-sm border-b border-gray-50 pb-2 text-left hover:bg-gray-50 rounded-lg px-1 -mx-1 transition">
+                  <div>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full mr-2 ${LEAD_STATUS_COLORS[l.status] || LEAD_STATUS_COLORS.new}`}>{(l.status || 'new').replace(/_/g, ' ')}</span>
+                    <span className="text-gray-400 text-xs">{new Date(l.created_at).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                  </div>
+                  <div className="font-mono font-bold">{formatKsh(l.grand_total_kes || 0)}</div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {tab === 'salesorders' && (
+            !salesOrders ? <div className="text-xs text-gray-400">Loading…</div> :
+            !salesOrders.length ? <div className="text-xs text-gray-400 italic">No sales orders yet.</div> :
+            <div className="space-y-2">
+              {salesOrders.map(so => (
+                <button key={so.id} onClick={() => jump('salesorders', so.id)} className="w-full flex justify-between text-sm border-b border-gray-50 pb-2 text-left hover:bg-gray-50 rounded-lg px-1 -mx-1 transition">
+                  <div>
+                    <span className="font-semibold text-gray-700 mr-2">{formatDocNumber(business.soPrefix, so.so_number)}</span>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${SO_STATUS_COLORS[so.status] || SO_STATUS_COLORS.draft}`}>{so.status.replace(/_/g, ' ')}</span>
+                  </div>
+                  <div className="font-mono font-bold">{formatKsh(so.total_kes || 0)}</div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {tab === 'invoices' && (
+            !invoices ? <div className="text-xs text-gray-400">Loading…</div> :
+            !invoices.length ? <div className="text-xs text-gray-400 italic">No invoices yet.</div> :
+            <div className="space-y-2">
+              {invoices.map(inv => (
+                <button key={inv.id} onClick={() => jump('invoices', inv.id)} className="w-full flex justify-between text-sm border-b border-gray-50 pb-2 text-left hover:bg-gray-50 rounded-lg px-1 -mx-1 transition">
+                  <div>
+                    <span className="font-semibold text-gray-700 mr-2">{formatDocNumber(business.invoicePrefix, inv.invoice_number, { year: new Date(inv.issue_date).getFullYear() })}</span>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${INV_STATUS_COLORS[inv.status] || INV_STATUS_COLORS.draft}`}>{inv.status.replace(/_/g, ' ')}</span>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-mono font-bold">{formatKsh(inv.total_kes || 0)}</div>
+                    {Number(inv.balance_due_kes) > 0 && <div className="text-xs text-red-600">{formatKsh(inv.balance_due_kes)} due</div>}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default function AdminCustomers({ session, onNavigate, business = BUSINESS_FALLBACK }) {
   const [customers, setCustomers] = useState([])
   const [loading,    setLoading]  = useState(true)
   const [toggling,   setToggling] = useState({})
+  const [viewing,    setViewing]  = useState(null)
 
   useEffect(() => { load() }, [])
 
@@ -39,6 +202,7 @@ export default function AdminCustomers({ session }) {
     setToggling(p => ({ ...p, [customer.id]: false }))
     if (!error) {
       setCustomers(p => p.map(c => c.id === customer.id ? { ...c, status: next } : c))
+      setViewing(v => v && v.id === customer.id ? { ...v, status: next } : v)
       logAdminAction(session, 'customer_status_change', customer.id, { email: customer.email, status: next })
     }
   }
@@ -84,8 +248,10 @@ export default function AdminCustomers({ session }) {
                 {customers.map(c => (
                   <tr key={c.id} className={`hover:bg-gray-50 transition ${c.status === 'suspended' ? 'opacity-60' : ''}`}>
                     <td className="px-5 py-3">
-                      <div className="font-semibold text-gray-800">{c.full_name || 'Unnamed'}</div>
-                      <div className="text-xs text-gray-400">{c.email}</div>
+                      <button onClick={() => setViewing(c)} className="text-left">
+                        <div className="font-semibold text-gray-800 hover:text-blue-600 transition">{c.full_name || 'Unnamed'}</div>
+                        <div className="text-xs text-gray-400">{c.email}</div>
+                      </button>
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500">
                       {new Date(c.created_at).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' })}
@@ -109,6 +275,17 @@ export default function AdminCustomers({ session }) {
             </table>
           </div>
         </div>
+      )}
+
+      {viewing && (
+        <CustomerDetailModal
+          row={viewing}
+          onClose={() => setViewing(null)}
+          onNavigate={onNavigate}
+          business={business}
+          toggling={toggling[viewing.id]}
+          onToggled={toggleSuspend}
+        />
       )}
     </div>
   )

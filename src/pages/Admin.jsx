@@ -1103,7 +1103,7 @@ export default function Admin({ onBack }) {
           {activeTab === 'purchasing'  && <AdminPurchaseOrders session={session} business={business} />}
           {activeTab === 'salesorders' && <AdminSalesOrders session={session} onNavigate={navigateTo} focusId={focusId} business={business} />}
           {activeTab === 'invoices'    && <AdminInvoices session={session} onNavigate={navigateTo} focusId={focusId} business={business} />}
-          {activeTab === 'customers'   && <AdminCustomers session={session} />}
+          {activeTab === 'customers'   && <AdminCustomers session={session} onNavigate={navigateTo} business={business} />}
           {activeTab === 'reports'     && <AdminReports session={session} />}
           {activeTab === 'settings'    && <AdminSettings session={session} onSettingsChanged={setBusiness} />}
         </div>
