@@ -86,7 +86,10 @@ serve(async (req: Request) => {
         console.error('createUser failed:', createErr)
         return json({ error: createErr?.message || 'Could not create account' }, 500)
       }
-      return json({ message: `Account created for ${cleanEmail}. Password: ${password} — share this with the customer now, it won't be shown again.` })
+      return json({
+        userId: created.user.id,
+        message: `Account created for ${cleanEmail}. Password: ${password} — share this with the customer now, it won't be shown again.`,
+      })
     }
 
     const { data: invited, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(cleanEmail, {
@@ -97,7 +100,10 @@ serve(async (req: Request) => {
       return json({ error: inviteErr?.message || 'Could not send invite' }, 500)
     }
 
-    return json({ message: `Invite sent to ${cleanEmail} — their account already appears in the list; they'll be able to sign in once they set a password via the emailed link.` })
+    return json({
+      userId: invited.user.id,
+      message: `Invite sent to ${cleanEmail} — their account already appears in the list; they'll be able to sign in once they set a password via the emailed link.`,
+    })
 
   } catch (err) {
     console.error('invite-customer error:', err)

@@ -379,6 +379,13 @@ export default function AdminCustomers({ session, onNavigate, business = BUSINES
   const [showPassword, setShowPassword] = useState(false)
   const [inviting,    setInviting]    = useState(false)
   const [inviteMsg,   setInviteMsg]   = useState(null)
+  // Same profile fields as the Customer Detail edit form — filling these in
+  // at creation time means a newly-added customer doesn't need a separate
+  // edit pass right after.
+  const [newProfile, setNewProfile] = useState({
+    customer_type: 'individual', company_name: '', contact_person: '', phone: '',
+    kra_pin: '', billing_address: '', site_address: '', notes: '',
+  })
 
   useEffect(() => { load() }, [])
 
@@ -433,11 +440,31 @@ export default function AdminCustomers({ session, onNavigate, business = BUSINES
     setInviting(false)
     if (error || data?.error) {
       setInviteMsg({ ok: false, text: data?.error || error.message || 'Could not add customer.' })
-    } else {
-      setInviteMsg({ ok: true, text: data.message })
-      setNewEmail(''); setNewFullName(''); setNewPassword(''); setShowPassword(false)
-      load()
+      return
     }
+
+    // Fill in the extra profile fields right away, rather than requiring a
+    // separate edit pass — handle_new_customer already created the row
+    // (customer_profiles.id = the new auth user's id) by the time this
+    // function returns.
+    const hasExtra = Object.entries(newProfile).some(([k, v]) => k === 'customer_type' ? v !== 'individual' : v.trim())
+    if (data.userId && hasExtra) {
+      await supabase.from('customer_profiles').update({
+        customer_type:   newProfile.customer_type,
+        company_name:    newProfile.company_name.trim() || null,
+        contact_person:  newProfile.contact_person.trim() || null,
+        phone:           newProfile.phone.trim() || null,
+        kra_pin:         newProfile.kra_pin.trim() || null,
+        billing_address: newProfile.billing_address.trim() || null,
+        site_address:    newProfile.site_address.trim() || null,
+        notes:           newProfile.notes.trim() || null,
+      }).eq('id', data.userId)
+    }
+
+    setInviteMsg({ ok: true, text: data.message })
+    setNewEmail(''); setNewFullName(''); setNewPassword(''); setShowPassword(false)
+    setNewProfile({ customer_type: 'individual', company_name: '', contact_person: '', phone: '', kra_pin: '', billing_address: '', site_address: '', notes: '' })
+    load()
   }
 
   if (loading) return <div className="flex items-center justify-center py-20 text-gray-400">Loading customers…</div>
@@ -481,6 +508,30 @@ export default function AdminCustomers({ session, onNavigate, business = BUSINES
               </button>
             </div>
           )}
+
+          <div className="border-t border-blue-100 pt-2 space-y-2">
+            <div className="flex gap-1 bg-white rounded-xl p-1 w-fit border border-blue-100">
+              {[['individual', 'Individual'], ['business', 'Business']].map(([v, label]) => (
+                <button key={v} onClick={() => setNewProfile(f => ({ ...f, customer_type: v }))}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition ${newProfile.customer_type === v ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-gray-700'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {newProfile.customer_type === 'business' && (
+              <div className="grid grid-cols-2 gap-2">
+                <input placeholder="Company name" className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs" value={newProfile.company_name} onChange={e => setNewProfile(f => ({ ...f, company_name: e.target.value }))} />
+                <input placeholder="Contact person" className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs" value={newProfile.contact_person} onChange={e => setNewProfile(f => ({ ...f, contact_person: e.target.value }))} />
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <input placeholder="Phone" className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs" value={newProfile.phone} onChange={e => setNewProfile(f => ({ ...f, phone: e.target.value }))} />
+              <input placeholder="KRA PIN (optional)" className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs" value={newProfile.kra_pin} onChange={e => setNewProfile(f => ({ ...f, kra_pin: e.target.value }))} />
+            </div>
+            <input placeholder="Billing address" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs" value={newProfile.billing_address} onChange={e => setNewProfile(f => ({ ...f, billing_address: e.target.value }))} />
+            <input placeholder="Site address" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs" value={newProfile.site_address} onChange={e => setNewProfile(f => ({ ...f, site_address: e.target.value }))} />
+            <textarea placeholder="Internal notes (optional)" rows={2} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs resize-none" value={newProfile.notes} onChange={e => setNewProfile(f => ({ ...f, notes: e.target.value }))} />
+          </div>
 
           {inviteMsg && <div className={`text-xs font-semibold ${inviteMsg.ok ? 'text-green-700' : 'text-red-700'}`}>{inviteMsg.text}</div>}
 
