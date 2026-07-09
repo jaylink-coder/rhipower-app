@@ -50,13 +50,16 @@ const INV_STATUS_COLORS = {
   paid: 'bg-green-100 text-green-800', void: 'bg-gray-200 text-gray-500',
 }
 
-function CustomerDetailModal({ row, onClose, onNavigate, business, onToggled, toggling }) {
+function CustomerDetailModal({ row, onClose, onNavigate, business, onToggled, toggling, onUpdated, session }) {
   const [tab, setTab] = useState('overview')
   const [leads,       setLeads]       = useState(null)
   const [salesOrders, setSalesOrders] = useState(null)
   const [invoices,    setInvoices]    = useState(null)
   const [payments,    setPayments]    = useState(null)
   const [range,       setRange]       = useState('this_year')
+  const [editing,     setEditing]     = useState(false)
+  const [form,        setForm]        = useState(null)
+  const [savingProfile, setSavingProfile] = useState(false)
 
   useEffect(() => {
     Promise.all([
@@ -91,6 +94,41 @@ function CustomerDetailModal({ row, onClose, onNavigate, business, onToggled, to
     onClose()
   }
 
+  function startEdit() {
+    setForm({
+      customer_type:    row.customer_type || 'individual',
+      company_name:     row.company_name || '',
+      contact_person:   row.contact_person || '',
+      phone:            row.phone || latestQuote?.client_phone || '',
+      kra_pin:          row.kra_pin || '',
+      billing_address:  row.billing_address || '',
+      site_address:     row.site_address || latestQuote?.site_address || '',
+      notes:            row.notes || '',
+    })
+    setEditing(true)
+  }
+
+  async function saveProfile() {
+    setSavingProfile(true)
+    const payload = {
+      customer_type:    form.customer_type,
+      company_name:     form.company_name.trim() || null,
+      contact_person:   form.contact_person.trim() || null,
+      phone:            form.phone.trim() || null,
+      kra_pin:          form.kra_pin.trim() || null,
+      billing_address:  form.billing_address.trim() || null,
+      site_address:     form.site_address.trim() || null,
+      notes:            form.notes.trim() || null,
+    }
+    const { data, error } = await supabase.from('customer_profiles').update(payload).eq('id', row.id).select().single()
+    setSavingProfile(false)
+    if (!error && data) {
+      onUpdated(data)
+      setEditing(false)
+      logAdminAction(session, 'customer_profile_updated', row.id, { email: row.email })
+    }
+  }
+
   // Statement ledger — every non-void invoice (debit) and every payment
   // against one (credit), sorted oldest-first, with a running balance.
   // Entries dated before the selected range collapse into an opening
@@ -117,9 +155,14 @@ function CustomerDetailModal({ row, onClose, onNavigate, business, onToggled, to
       <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="p-5 border-b border-gray-100 flex items-start justify-between">
           <div>
-            <h3 className="font-black text-gray-800 text-lg">{row.full_name || 'Unnamed'}</h3>
-            <div className="text-xs text-gray-400">{row.email}{latestQuote?.client_phone ? ` · ${latestQuote.client_phone}` : ''}</div>
-            {latestQuote?.site_address && <div className="text-xs text-gray-400">{latestQuote.site_address}</div>}
+            <h3 className="font-black text-gray-800 text-lg">
+              {row.customer_type === 'business' && row.company_name ? row.company_name : (row.full_name || 'Unnamed')}
+            </h3>
+            {row.customer_type === 'business' && (row.contact_person || row.full_name) && (
+              <div className="text-xs text-gray-500 font-semibold">{row.contact_person || row.full_name}</div>
+            )}
+            <div className="text-xs text-gray-400">{row.email}{(row.phone || latestQuote?.client_phone) ? ` · ${row.phone || latestQuote.client_phone}` : ''}</div>
+            {(row.site_address || latestQuote?.site_address) && <div className="text-xs text-gray-400">{row.site_address || latestQuote.site_address}</div>}
             {row.status === 'suspended' && <span className="inline-block mt-1 text-xs font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">Suspended</span>}
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
@@ -137,6 +180,58 @@ function CustomerDetailModal({ row, onClose, onNavigate, business, onToggled, to
         <div className="p-5">
           {tab === 'overview' && (
             <div className="space-y-4">
+              <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 text-sm">
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="font-black text-gray-700 text-xs uppercase tracking-wider">Contact Info</div>
+                  {!editing && (
+                    <button onClick={startEdit} className="text-xs font-bold text-blue-600 hover:text-blue-800">Edit</button>
+                  )}
+                </div>
+
+                {editing ? (
+                  <div className="space-y-2 pt-1">
+                    <div className="flex gap-1 bg-white rounded-xl p-1 w-fit border border-gray-200">
+                      {[['individual', 'Individual'], ['business', 'Business']].map(([v, label]) => (
+                        <button key={v} onClick={() => setForm(f => ({ ...f, customer_type: v }))}
+                          className={`px-3 py-1 rounded-lg text-xs font-bold transition ${form.customer_type === v ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-gray-700'}`}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {form.customer_type === 'business' && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <input placeholder="Company name" className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs" value={form.company_name} onChange={e => setForm(f => ({ ...f, company_name: e.target.value }))} />
+                        <input placeholder="Contact person" className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs" value={form.contact_person} onChange={e => setForm(f => ({ ...f, contact_person: e.target.value }))} />
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-2">
+                      <input placeholder="Phone" className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+                      <input placeholder="KRA PIN (optional)" className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs" value={form.kra_pin} onChange={e => setForm(f => ({ ...f, kra_pin: e.target.value }))} />
+                    </div>
+                    <input placeholder="Billing address" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs" value={form.billing_address} onChange={e => setForm(f => ({ ...f, billing_address: e.target.value }))} />
+                    <input placeholder="Site address" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs" value={form.site_address} onChange={e => setForm(f => ({ ...f, site_address: e.target.value }))} />
+                    <textarea placeholder="Internal notes" rows={2} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs resize-none" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+                    <div className="flex gap-2">
+                      <button onClick={saveProfile} disabled={savingProfile} className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition disabled:opacity-50">
+                        {savingProfile ? 'Saving…' : 'Save'}
+                      </button>
+                      <button onClick={() => setEditing(false)} className="text-xs text-gray-400 hover:text-gray-600 px-2">Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-1 pt-1">
+                    <div className="flex justify-between"><span className="text-gray-400">Type</span><span className="font-semibold capitalize">{row.customer_type || 'individual'}</span></div>
+                    {row.customer_type === 'business' && <div className="flex justify-between"><span className="text-gray-400">Company</span><span className="font-semibold">{row.company_name || '—'}</span></div>}
+                    {row.customer_type === 'business' && <div className="flex justify-between"><span className="text-gray-400">Contact Person</span><span className="font-semibold">{row.contact_person || '—'}</span></div>}
+                    <div className="flex justify-between"><span className="text-gray-400">Phone</span><span className="font-semibold">{row.phone || latestQuote?.client_phone || '—'}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-400">KRA PIN</span><span className="font-semibold">{row.kra_pin || '—'}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-400">Billing Address</span><span className="font-semibold text-right">{row.billing_address || '—'}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-400">Site Address</span><span className="font-semibold text-right">{row.site_address || latestQuote?.site_address || '—'}</span></div>
+                    {row.notes && <div className="pt-1 text-xs text-gray-500 italic border-t border-gray-100 mt-1">{row.notes}</div>}
+                  </div>
+                )}
+              </div>
+
               <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 space-y-1.5 text-sm">
                 <div className="font-black text-gray-700 text-xs uppercase tracking-wider mb-1">Receivables</div>
                 <div className="flex justify-between"><span className="text-gray-400">Total Invoiced</span><span className="font-bold">{formatKsh(totalInvoiced)}</span></div>
@@ -439,8 +534,11 @@ export default function AdminCustomers({ session, onNavigate, business = BUSINES
                   <tr key={c.id} className={`hover:bg-gray-50 transition ${c.status === 'suspended' ? 'opacity-60' : ''}`}>
                     <td className="px-5 py-3">
                       <button onClick={() => setViewing(c)} className="text-left">
-                        <div className="font-semibold text-gray-800 hover:text-blue-600 transition">{c.full_name || 'Unnamed'}</div>
-                        <div className="text-xs text-gray-400">{c.email}</div>
+                        <div className="font-semibold text-gray-800 hover:text-blue-600 transition">
+                          {c.customer_type === 'business' && c.company_name ? c.company_name : (c.full_name || 'Unnamed')}
+                          {c.customer_type === 'business' && <span className="ml-1.5 text-[10px] font-bold bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full align-middle">Business</span>}
+                        </div>
+                        <div className="text-xs text-gray-400">{c.email}{c.phone ? ` · ${c.phone}` : ''}</div>
                       </button>
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500">
@@ -473,8 +571,13 @@ export default function AdminCustomers({ session, onNavigate, business = BUSINES
           onClose={() => setViewing(null)}
           onNavigate={onNavigate}
           business={business}
+          session={session}
           toggling={toggling[viewing.id]}
           onToggled={toggleSuspend}
+          onUpdated={updated => {
+            setCustomers(p => p.map(c => c.id === updated.id ? { ...c, ...updated } : c))
+            setViewing(v => v && v.id === updated.id ? { ...v, ...updated } : v)
+          }}
         />
       )}
     </div>
