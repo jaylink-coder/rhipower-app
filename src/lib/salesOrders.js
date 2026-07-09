@@ -98,3 +98,15 @@ export async function convertQuoteToSalesOrder(quote, session) {
   logAdminAction(session, 'sales_order_created', so.id, { quotation_id: quote.id, total: results.grandTotal })
   return { ...so, sales_order_lines: lineRows || [] }
 }
+
+// Called whenever a Sales Order reaches 'fulfilled' (per-line fulfillment or
+// the fast-track action) — closes the loop back to Leads & Pipeline so
+// "the job shipped" doesn't also require a separate manual status update.
+// Never downgrades a lead that's already Installed or explicitly Lost.
+export async function syncLeadStatusToInstalled(so, session) {
+  if (!so.quotation_id) return
+  const { data: lead } = await supabase.from('quotation_requests').select('status').eq('id', so.quotation_id).single()
+  if (!lead || lead.status === 'installed' || lead.status === 'lost') return
+  await supabase.from('quotation_requests').update({ status: 'installed' }).eq('id', so.quotation_id)
+  logAdminAction(session, 'lead_status_change', so.quotation_id, { status: 'installed', reason: 'sales_order_fulfilled' })
+}

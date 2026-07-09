@@ -20,7 +20,7 @@ const TIER_LABELS = { premium: '⭐ Premium', balanced: '✅ Balanced', budget: 
 const PATH_LABELS = { buy: '🛒 Supply Only', diy: '🔧 DIY', book: '👷 Full Turnkey' }
 const PROF_LABELS = { homeowner: '🏠 Homeowner', diy: '🔌 DIY', professional: '⚡ Engineer', business: '🏢 Business' }
 
-export default function AdminLeads({ session }) {
+export default function AdminLeads({ session, onNavigate, focusId }) {
   const [leads,         setLeads]         = useState([])
   const [deposits,      setDeposits]      = useState({})   // quotation_id -> deposit_transactions row
   const [salesOrders,   setSalesOrders]   = useState({})   // quotation_id -> sales_orders row
@@ -34,6 +34,8 @@ export default function AdminLeads({ session }) {
   const [convertError,  setConvertError]  = useState({})
 
   useEffect(() => { loadLeads() }, [])
+  // Jumped here from another tab (e.g. "View Lead" on a Sales Order) — expand that lead
+  useEffect(() => { if (focusId && leads.some(l => l.id === focusId)) setExpanded(focusId) }, [focusId, leads])
 
   async function loadLeads() {
     setLoading(true)
@@ -245,7 +247,10 @@ export default function AdminLeads({ session }) {
                 {SO_ELIGIBLE_STATUSES.includes(lead.status) && (
                   <div className="rounded-xl p-3 text-xs font-semibold bg-purple-50 border border-purple-200 text-purple-800 flex items-center justify-between flex-wrap gap-2">
                     {salesOrders[lead.id] ? (
-                      <span>📑 SO-{String(salesOrders[lead.id].so_number).padStart(4, '0')} created — status: {salesOrders[lead.id].status.replace(/_/g, ' ')} (see Sales Orders tab)</span>
+                      <button onClick={() => onNavigate?.('salesorders', salesOrders[lead.id].id)}
+                        className="underline decoration-dotted hover:text-purple-900 text-left">
+                        📑 SO-{String(salesOrders[lead.id].so_number).padStart(4, '0')} — status: {salesOrders[lead.id].status.replace(/_/g, ' ')} (view →)
+                      </button>
                     ) : (
                       <>
                         <span>No Sales Order yet for this quote.</span>

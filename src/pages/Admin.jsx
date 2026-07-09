@@ -970,6 +970,14 @@ export default function Admin({ onBack }) {
   const [activeTab,   setActiveTab]   = useState('home')
   const [invSection,  setInvSection]  = useState('products')  // Inventory's sub-nav, shown in the top bar
   const [showWarning, setShowWarning] = useState(false)
+  // Cross-navigation: jump to another section AND auto-expand a specific
+  // record — e.g. "View Sales Order" from a lead, or "View Invoice" from a
+  // Sales Order — instead of leaving the admin to hunt for it themselves.
+  const [focusId, setFocusId] = useState(null)
+  function navigateTo(tab, id = null) {
+    setActiveTab(tab)
+    setFocusId(id)
+  }
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session))
@@ -1048,13 +1056,13 @@ export default function Admin({ onBack }) {
         </div>
 
         <div className="max-w-7xl px-4 py-6">
-          {activeTab === 'home'        && <AdminHome session={session} onNavigate={setActiveTab} />}
-          {activeTab === 'leads'       && <AdminLeads session={session} />}
+          {activeTab === 'home'        && <AdminHome session={session} onNavigate={navigateTo} />}
+          {activeTab === 'leads'       && <AdminLeads session={session} onNavigate={navigateTo} focusId={focusId} />}
           {activeTab === 'inventory'   && <InventoryTable session={session} invSection={invSection} />}
           {activeTab === 'suppliers'   && <AdminSuppliers session={session} />}
           {activeTab === 'purchasing'  && <AdminPurchaseOrders session={session} />}
-          {activeTab === 'salesorders' && <AdminSalesOrders session={session} />}
-          {activeTab === 'invoices'    && <AdminInvoices session={session} />}
+          {activeTab === 'salesorders' && <AdminSalesOrders session={session} onNavigate={navigateTo} focusId={focusId} />}
+          {activeTab === 'invoices'    && <AdminInvoices session={session} onNavigate={navigateTo} focusId={focusId} />}
           {activeTab === 'customers'   && <AdminCustomers session={session} />}
         </div>
       </div>

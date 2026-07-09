@@ -75,7 +75,7 @@ function RecordPaymentForm({ invoice, session, onRecorded }) {
   )
 }
 
-export default function AdminInvoices({ session }) {
+export default function AdminInvoices({ session, onNavigate, focusId }) {
   const [invoices, setInvoices] = useState([])
   const [payments, setPayments] = useState({})  // invoice_id -> payments[]
   const [loading,  setLoading]  = useState(true)
@@ -84,6 +84,8 @@ export default function AdminInvoices({ session }) {
   const [confirmingVoid, setConfirmingVoid] = useState(null)
 
   useEffect(() => { load() }, [])
+  // Jumped here from another tab (e.g. "View Invoice" on a Sales Order)
+  useEffect(() => { if (focusId && invoices.some(i => i.id === focusId)) setExpanded(focusId) }, [focusId, invoices])
 
   async function load() {
     setLoading(true)
@@ -182,6 +184,11 @@ export default function AdminInvoices({ session }) {
 
             {isOpen && (
               <div className="border-t border-gray-100 px-5 py-4 space-y-3 bg-gray-50">
+                {inv.sales_order_id && (
+                  <button onClick={() => onNavigate?.('salesorders', inv.sales_order_id)} className="text-xs text-blue-600 hover:text-blue-800 underline decoration-dotted">
+                    ← View Sales Order
+                  </button>
+                )}
                 <div className="bg-white rounded-xl p-3 divide-y divide-gray-50">
                   {lines.map(l => (
                     <div key={l.id} className="flex justify-between text-sm py-1.5">

@@ -11,6 +11,7 @@ import { formatKsh } from '../lib/calculator.js'
 import { logAdminAction } from '../lib/auditLog.js'
 import { logStockMovement } from '../lib/inventory.js'
 import { generateInvoiceFromSalesOrder } from '../lib/invoices.js'
+import { syncLeadStatusToInstalled } from '../lib/salesOrders.js'
 
 const STATUS_OPTIONS = [
   { value: 'draft',                label: 'Draft',                color: 'bg-gray-100  text-gray-600'  },
@@ -66,7 +67,7 @@ function FulfillLineRow({ so, line, item, session, onFulfilled }) {
   )
 }
 
-export default function AdminSalesOrders({ session }) {
+export default function AdminSalesOrders({ session, onNavigate, focusId }) {
   const [sos,      setSos]      = useState([])
   const [items,    setItems]    = useState({})
   const [invoices, setInvoices] = useState({})  // sales_order_id -> invoices row
@@ -78,8 +79,12 @@ export default function AdminSalesOrders({ session }) {
   const [busyCancel,  setBusyCancel]  = useState({})
   const [busyInvoice, setBusyInvoice] = useState({})
   const [invoiceError, setInvoiceError] = useState({})
+  const [busyFastTrack, setBusyFastTrack] = useState({})
+  const [fastTrackError, setFastTrackError] = useState({})
 
   useEffect(() => { load() }, [])
+  // Jumped here from another tab (e.g. "View Sales Order" on a lead or invoice)
+  useEffect(() => { if (focusId && sos.some(s => s.id === focusId)) setExpanded(focusId) }, [focusId, sos])
 
   async function load() {
     setLoading(true)
@@ -175,9 +180,68 @@ export default function AdminSalesOrders({ session }) {
       const allDone = lines.every(l => l.qty_fulfilled >= l.qty)
       const anyDone = lines.some(l => l.qty_fulfilled > 0)
       const status  = allDone ? 'fulfilled' : anyDone ? 'partially_fulfilled' : x.status
-      if (status !== x.status) supabase.from('sales_orders').update({ status }).eq('id', x.id).then(() => {})
+      if (status !== x.status) {
+        supabase.from('sales_orders').update({ status }).eq('id', x.id).then(() => {})
+        if (status === 'fulfilled') syncLeadStatusToInstalled(x, session)
+      }
       return { ...x, sales_order_lines: lines, status }
     }))
+  }
+
+  // One-click path for the common case: reserve stock, fulfill every line in
+  // full, sync the lead to Installed, and generate the invoice — but only
+  // when there's no stock shortage. If there is, this bails into the same
+  // warning the step-by-step "Confirm" button shows, so backorders and
+  // partial deliveries always go through the manual controls below instead.
+  async function fastTrack(so) {
+    const deductingLines = (so.sales_order_lines || []).filter(l => l.is_stock_deducting && l.role_key)
+    if (so.status === 'draft') {
+      const shortages = deductingLines
+        .map(l => ({ line: l, item: items[l.role_key] }))
+        .filter(({ line, item }) => item?.stock_qty != null && item.stock_qty < line.qty)
+      if (shortages.length > 0) {
+        setConfirmWarnings(p => ({ ...p, [so.id]: shortages }))
+        return
+      }
+    }
+    setBusyFastTrack(p => ({ ...p, [so.id]: true }))
+    setFastTrackError(p => { const n = { ...p }; delete n[so.id]; return n })
+    try {
+      if (so.status === 'draft') {
+        for (const line of deductingLines) {
+          const item = items[line.role_key]
+          if (!item || item.stock_qty == null) continue
+          const newStock = item.stock_qty - line.qty
+          await supabase.from('inventory_prices').update({ stock_qty: newStock, updated_at: new Date().toISOString() }).eq('role_key', line.role_key)
+          await logStockMovement({
+            roleKey: line.role_key, quantityChanged: -line.qty, session,
+            movementType: 'reservation', sourceType: 'sales_order', sourceId: so.id,
+            reason: `Reserved for ${poNumber(so)} (fast-track)`,
+          })
+        }
+        await supabase.from('sales_orders').update({ status: 'confirmed', updated_at: new Date().toISOString() }).eq('id', so.id)
+        logAdminAction(session, 'sales_order_confirmed', so.id, { quotation_id: so.quotation_id, fastTrack: true })
+      }
+      if (['draft', 'confirmed', 'partially_fulfilled'].includes(so.status)) {
+        for (const line of so.sales_order_lines || []) {
+          if (line.qty_fulfilled < line.qty) {
+            await supabase.from('sales_order_lines').update({ qty_fulfilled: line.qty }).eq('id', line.id)
+          }
+        }
+        await supabase.from('sales_orders').update({ status: 'fulfilled', updated_at: new Date().toISOString() }).eq('id', so.id)
+        logAdminAction(session, 'sales_order_line_fulfilled', so.id, { fastTrack: true, allLines: true })
+        await syncLeadStatusToInstalled(so, session)
+      }
+      if (!invoices[so.id]) {
+        const invoice = await generateInvoiceFromSalesOrder({ ...so, status: 'fulfilled' }, session)
+        setInvoices(p => ({ ...p, [so.id]: invoice }))
+      }
+      logAdminAction(session, 'sales_order_fast_tracked', so.id, {})
+    } catch (err) {
+      setFastTrackError(p => ({ ...p, [so.id]: err.message || 'Fast-track stopped partway through — check this order and finish any remaining step manually below.' }))
+    }
+    await load()
+    setBusyFastTrack(p => ({ ...p, [so.id]: false }))
   }
 
   const filtered = filter === 'all' ? sos : sos.filter(s => s.status === filter)
@@ -237,6 +301,11 @@ export default function AdminSalesOrders({ session }) {
 
             {isOpen && (
               <div className="border-t border-gray-100 px-5 py-4 space-y-3 bg-gray-50">
+                {so.quotation_id && (
+                  <button onClick={() => onNavigate?.('leads', so.quotation_id)} className="text-xs text-blue-600 hover:text-blue-800 underline decoration-dotted">
+                    ← View originating lead
+                  </button>
+                )}
                 <div className="bg-white rounded-xl p-3 divide-y divide-gray-50">
                   {lines.map(line => (
                     <FulfillLineRow key={line.id} so={so} line={line} item={items[line.role_key]} session={session}
@@ -258,9 +327,16 @@ export default function AdminSalesOrders({ session }) {
                   </div>
                 )}
 
-                {invoiceError[so.id] && <div className="text-xs text-red-700 font-semibold">{invoiceError[so.id]}</div>}
+                {invoiceError[so.id]   && <div className="text-xs text-red-700 font-semibold">{invoiceError[so.id]}</div>}
+                {fastTrackError[so.id] && <div className="text-xs text-red-700 font-semibold">{fastTrackError[so.id]}</div>}
 
                 <div className="flex gap-2 flex-wrap">
+                  {['draft', 'confirmed', 'partially_fulfilled'].includes(so.status) && !warnings && (
+                    <button onClick={() => fastTrack(so)} disabled={busyFastTrack[so.id]}
+                      className="text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg transition disabled:opacity-50">
+                      {busyFastTrack[so.id] ? 'Working…' : so.status === 'draft' ? '⚡ Fast-track (Confirm + Fulfill + Invoice)' : '⚡ Fulfill All + Invoice'}
+                    </button>
+                  )}
                   {so.status === 'draft' && (
                     <button onClick={() => confirmSO(so)} disabled={busyConfirm[so.id]}
                       className="text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg transition disabled:opacity-50">
@@ -275,9 +351,10 @@ export default function AdminSalesOrders({ session }) {
                   )}
                   {so.status !== 'draft' && so.status !== 'cancelled' && (
                     invoices[so.id] ? (
-                      <span className="text-xs font-bold text-purple-700 bg-purple-50 px-3 py-2 rounded-lg">
-                        📄 INV-{invoices[so.id].invoice_number} created — {invoices[so.id].status.replace(/_/g, ' ')} (see Invoices tab)
-                      </span>
+                      <button onClick={() => onNavigate?.('invoices', invoices[so.id].id)}
+                        className="text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 px-3 py-2 rounded-lg transition">
+                        📄 INV-{invoices[so.id].invoice_number} — {invoices[so.id].status.replace(/_/g, ' ')} (view →)
+                      </button>
                     ) : (
                       <button onClick={() => handleGenerateInvoice(so)} disabled={busyInvoice[so.id]}
                         className="text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded-lg transition disabled:opacity-50">
