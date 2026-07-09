@@ -34,6 +34,7 @@ function lineFromBOM(zone, item, costByRoleKey) {
     role_key: item.roleKey || null,
     qty: qtyNum,
     unit_cost_kes: item.roleKey ? (costByRoleKey[item.roleKey] ?? null) : null,
+    vat_status: item.vatStatus || 'standard',
     is_stock_deducting: Boolean(item.roleKey),
   }
 }
@@ -70,8 +71,8 @@ export async function convertQuoteToSalesOrder(quote, session) {
     ...results.zoneA.map(l => lineFromBOM('zoneA', l, costByRoleKey)),
     ...results.zoneB.map(l => lineFromBOM('zoneB', l, costByRoleKey)),
     ...results.zoneC.map(l => lineFromBOM('zoneC', l, costByRoleKey)),
-    { zone: 'labor',      description: 'Installation Labour',           sku_snapshot: null, role_key: null, qty: 1, unit_cost_kes: results.totalLabor,     is_stock_deducting: false },
-    { zone: 'logistics',  description: 'Logistics & Site Transport',    sku_snapshot: null, role_key: null, qty: 1, unit_cost_kes: results.totalLogistics, is_stock_deducting: false },
+    { zone: 'labor',      description: 'Installation Labour',           sku_snapshot: null, role_key: null, qty: 1, unit_cost_kes: results.totalLabor,     vat_status: 'standard', is_stock_deducting: false },
+    { zone: 'logistics',  description: 'Logistics & Site Transport',    sku_snapshot: null, role_key: null, qty: 1, unit_cost_kes: results.totalLogistics, vat_status: 'standard', is_stock_deducting: false },
   ]
 
   const { data: so, error } = await supabase.from('sales_orders').insert({

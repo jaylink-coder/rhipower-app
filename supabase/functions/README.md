@@ -11,6 +11,21 @@ supabase functions deploy notify-new-quote
 supabase secrets set RESEND_API_KEY=...
 ```
 
+## invite-admin
+Lets an existing admin invite a new one from Settings -> Users, without needing
+Supabase Dashboard access. Verifies the caller is already an admin, then creates
+the auth.users row (`auth.admin.inviteUserByEmail`, sends Supabase's built-in
+invite email) and the matching `admin_profiles` row. Requires Auth email delivery
+(SMTP) to be configured on the project — the same dependency customer signup
+confirmation already relies on.
+
+```
+supabase functions deploy invite-admin
+```
+
+No new secrets — reuses `SUPABASE_URL`/`SUPABASE_ANON_KEY`/`SUPABASE_SERVICE_ROLE_KEY`,
+which Supabase auto-provides to every function in the project already.
+
 ## M-Pesa deposit collection (mpesa-stk-push, mpesa-callback, mpesa-status)
 Lets a client pay a booking deposit via Safaricom Daraja STK Push. See
 `supabase/migrations/002_mpesa_deposits.sql` for the `deposit_transactions` table.

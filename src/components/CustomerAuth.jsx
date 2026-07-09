@@ -2,6 +2,7 @@
 // designs are saved and can be reopened later from "My Quotes".
 import { useState } from 'react'
 import { supabase, isSupabaseReady } from '../lib/supabase.js'
+import { FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
 
 // Always resolve to a readable string, however the error is shaped, so the
 // UI never renders something like a stray "{}" instead of real feedback.
@@ -13,7 +14,8 @@ function readableAuthError(err) {
   return raw
 }
 
-export default function CustomerAuth({ onBack, onSignedIn }) {
+export default function CustomerAuth({ onBack, onSignedIn, business = BUSINESS_FALLBACK }) {
+  const signupAllowed = business.allowCustomerSignup !== false
   const [mode,     setMode]     = useState('signin')   // 'signin' | 'signup'
   const [email,    setEmail]    = useState('')
   const [password, setPassword] = useState('')
@@ -28,6 +30,7 @@ export default function CustomerAuth({ onBack, onSignedIn }) {
     setLoading(true); setError('')
 
     if (mode === 'signup') {
+      if (!signupAllowed) { setLoading(false); setError('New sign-ups are currently disabled.'); return }
       const { data, error: signUpError } = await supabase.auth.signUp({
         email: email.trim(),
         password,
@@ -115,10 +118,12 @@ export default function CustomerAuth({ onBack, onSignedIn }) {
           </button>
         </form>
 
-        <button onClick={() => { setMode(m => m === 'signup' ? 'signin' : 'signup'); setError('') }}
-          className="w-full mt-4 text-xs text-blue-600 hover:text-blue-800 font-semibold transition">
-          {mode === 'signup' ? 'Already have an account? Sign in' : "New here? Create a free account"}
-        </button>
+        {(signupAllowed || mode === 'signup') && (
+          <button onClick={() => { setMode(m => m === 'signup' ? 'signin' : 'signup'); setError('') }}
+            className="w-full mt-4 text-xs text-blue-600 hover:text-blue-800 font-semibold transition">
+            {mode === 'signup' ? 'Already have an account? Sign in' : "New here? Create a free account"}
+          </button>
+        )}
         <button onClick={onBack} className="w-full mt-3 text-xs text-gray-400 hover:text-gray-600 transition">
           ← Back to RhiPower
         </button>

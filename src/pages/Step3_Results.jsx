@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { TIER_META }          from '../data/skuInventory.js'
 import { KENYA_LOCATIONS }    from '../lib/nasaPower.js'
 import { runCalculation, formatKsh } from '../lib/calculator.js'
-import { BUSINESS }           from '../config.js'
+import { FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
 import SystemDiagram          from '../components/SystemDiagram.jsx'
 import { supabase, isSupabaseReady } from '../lib/supabase.js'
 import MpesaDeposit from '../components/MpesaDeposit.jsx'
@@ -241,7 +241,8 @@ const PROFILE_LABELS = {
 
 // ── Main Component ─────────────────────────────────────────────────────────
 export default function Step3_Results({
-  allResults, defaultTier, defaultBackupDays, siteConfig, appliances, quantities, clientProfile, inventory, customerUser, onBack
+  allResults, defaultTier, defaultBackupDays, siteConfig, appliances, quantities, clientProfile, inventory, customerUser, onBack,
+  business = BUSINESS_FALLBACK,
 }) {
   const isPro      = clientProfile === 'professional'
   const isDIY      = clientProfile === 'diy'
@@ -293,6 +294,7 @@ export default function Step3_Results({
         isSelected={isSelected}
         onSelect={p => { handlePickProduct(viewingProduct.category, p); setViewingProduct(null) }}
         onBack={() => setViewingProduct(null)}
+        business={business}
       />
     )
   }
@@ -350,7 +352,7 @@ export default function Step3_Results({
       return
     }
     const msg = buildWhatsAppMessage(name, phone, siteConfig, results, activeTier, backupDays)
-    window.open(`https://wa.me/${BUSINESS.whatsapp.replace(/\D/g, '')}?text=${msg}`, '_blank')
+    window.open(`https://wa.me/${business.whatsapp.replace(/\D/g, '')}?text=${msg}`, '_blank')
     saveQuotation()   // fire-and-forget: saves to database without blocking the WhatsApp send
     setSubmitted(true)
   }
@@ -358,7 +360,7 @@ export default function Step3_Results({
   function handleDownloadPdf() {
     generateProposalPDF({
       client: { name, phone, email, address },
-      siteConfig, results, tier: activeTier, backupDays,
+      siteConfig, results, tier: activeTier, backupDays, business,
     })
   }
 
@@ -566,8 +568,8 @@ export default function Step3_Results({
           <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 text-xs text-indigo-800">
             <strong>Compliance:</strong> All core components meet IEC 61215 (panels), IEC 62109 (inverter),
             IEC 62619 (LiFePO₄ batteries), IEC 60947 (switchgear).
-            Installation wiring per Kenya National Electrical Code KS 638 / IEC 60364.
-            16% VAT applicable. Installer should be KEBS-registered.
+            Installation wiring per Kenya National Electrical Code KS 638 / IEC 60364.{' '}
+            {business.vatPricingMode === 'exclusive' ? `Plus ${business.vatRatePct}% VAT.` : `${business.vatRatePct}% VAT applicable.`} Installer should be KEBS-registered.
           </div>
           <button onClick={() => setActiveTab('quote')}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition print:hidden">
@@ -602,7 +604,7 @@ export default function Step3_Results({
               </div>
             </div>
             <div className="mt-4 text-xs text-gray-500 space-y-0.5">
-              <div>Prices inclusive of 16% VAT · Subject to site survey · {backupDays}-day backup · {TIER_META[activeTier]?.label}</div>
+              <div>{business.vatPricingMode === 'exclusive' ? `Prices exclusive of VAT — plus ${business.vatRatePct}% at invoicing` : `Prices inclusive of ${business.vatRatePct}% VAT`} · Subject to site survey · {backupDays}-day backup · {TIER_META[activeTier]?.label}</div>
               <div>
                 Warranty:{' '}
                 {results.selectedProducts?.panel?.warrantyYears    ? `${results.selectedProducts.panel.warrantyYears}-year panels` : '25-year panels'} ·{' '}
@@ -729,7 +731,7 @@ export default function Step3_Results({
                 </button>
                 <button onClick={() => {
                   const msg = buildWhatsAppMessage('DIY Order', '', siteConfig, results, activeTier, backupDays)
-                  window.open(`https://wa.me/${BUSINESS.whatsapp.replace(/\D/g, '')}?text=${msg}`, '_blank')
+                  window.open(`https://wa.me/${business.whatsapp.replace(/\D/g, '')}?text=${msg}`, '_blank')
                 }}
                   className="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold p-4 rounded-xl transition">
                   📤 Send Spec to My Electrician via WhatsApp

@@ -5,7 +5,8 @@
 // no server round-trip needed for this backend-less app).
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { BUSINESS } from '../config.js'
+import { FALLBACK as BUSINESS_FALLBACK } from './orgSettings.js'
+import { formatDocNumber } from './docNumbers.js'
 
 const NAVY  = [17, 24, 39]     // gray-900
 const GREEN = [4, 120, 87]     // emerald-700
@@ -16,12 +17,12 @@ function money(n) {
   return 'Ksh ' + Math.round(n).toLocaleString('en-KE')
 }
 
-function invoiceNumber(invoice) {
+function invoiceNumber(invoice, prefix) {
   const year = new Date(invoice.issue_date || invoice.created_at).getFullYear()
-  return `INV-${year}-${String(invoice.invoice_number).padStart(4, '0')}`
+  return formatDocNumber(prefix, invoice.invoice_number, { year })
 }
 
-function addFooter(doc, pageNum, pageCount) {
+function addFooter(doc, business, pageNum, pageCount) {
   const w = doc.internal.pageSize.getWidth()
   const h = doc.internal.pageSize.getHeight()
   doc.setDrawColor(...GRAY)
@@ -29,7 +30,7 @@ function addFooter(doc, pageNum, pageCount) {
   doc.line(14, h - 16, w - 14, h - 16)
   doc.setFontSize(8)
   doc.setTextColor(...GRAY)
-  doc.text(`${BUSINESS.name} · ${BUSINESS.whatsapp} · ${BUSINESS.email}`, 14, h - 10)
+  doc.text(`${business.businessName} · ${business.whatsapp} · ${business.email}`, 14, h - 10)
   doc.text(`Page ${pageNum} of ${pageCount}`, w - 14, h - 10, { align: 'right' })
 }
 
@@ -44,10 +45,10 @@ function sectionHeading(doc, text, y) {
   return y + 12
 }
 
-export function generateInvoicePDF({ invoice, lines, payments }) {
+export function generateInvoicePDF({ invoice, lines, payments, business = BUSINESS_FALLBACK }) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
-  const invNo = invoiceNumber(invoice)
+  const invNo = invoiceNumber(invoice, business.invoicePrefix)
 
   // ── HEADER ─────────────────────────────────────────────────────────────
   doc.setFillColor(...NAVY)
@@ -55,12 +56,12 @@ export function generateInvoicePDF({ invoice, lines, payments }) {
   doc.setTextColor(255, 255, 255)
   doc.setFontSize(20)
   doc.setFont(undefined, 'bold')
-  doc.text(BUSINESS.name, 14, 15)
+  doc.text(business.businessName, 14, 15)
   doc.setFontSize(9)
   doc.setFont(undefined, 'normal')
-  doc.text(BUSINESS.tagline, 14, 22)
-  let contactLine = `${BUSINESS.whatsapp}  ·  ${BUSINESS.email}  ·  ${BUSINESS.city}`
-  if (BUSINESS.kraPin) contactLine += `  ·  KRA PIN: ${BUSINESS.kraPin}`
+  doc.text(business.tagline, 14, 22)
+  let contactLine = `${business.whatsapp}  ·  ${business.email}  ·  ${business.city}`
+  if (business.kraPin) contactLine += `  ·  KRA PIN: ${business.kraPin}`
   doc.text(contactLine, 14, 27.5)
 
   doc.setFontSize(10)
@@ -156,7 +157,7 @@ export function generateInvoicePDF({ invoice, lines, payments }) {
   const pageCount = doc.internal.getNumberOfPages()
   for (let p = 1; p <= pageCount; p++) {
     doc.setPage(p)
-    addFooter(doc, p, pageCount)
+    addFooter(doc, business, p, pageCount)
   }
 
   doc.save(`RhiPower-${invNo}.pdf`)

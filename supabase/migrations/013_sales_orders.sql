@@ -13,11 +13,13 @@
 --                         record and must survive the quote being removed.
 --   sales_order_lines  — role_key uses ON DELETE SET NULL (unlike Purchase
 --                         Order lines' RESTRICT) plus a frozen description/
---                         sku_snapshot/unit_cost_kes captured at conversion
---                         time — a Sales Order must stay readable even if the
---                         catalog item it referenced is later deleted or
---                         renamed, same reasoning as quotation_requests'
---                         panel_role_key/etc. (migration 009).
+--                         sku_snapshot/unit_cost_kes/vat_status captured at
+--                         conversion time — a Sales Order must stay readable
+--                         (and its tax treatment stay historically accurate)
+--                         even if the catalog item it referenced is later
+--                         deleted, renamed, or reclassified, same reasoning
+--                         as quotation_requests' panel_role_key/etc.
+--                         (migration 009).
 -- =========================================================
 
 CREATE TABLE IF NOT EXISTS sales_orders (
@@ -54,6 +56,8 @@ CREATE TABLE IF NOT EXISTS sales_order_lines (
   sku_snapshot       TEXT,
   qty                NUMERIC(10,2) NOT NULL,  -- NUMERIC not INTEGER: cable lines are "123m", mounting is "4.2 kWp"
   unit_cost_kes      NUMERIC(12,2),           -- cost at conversion time, for future margin reporting
+  vat_status         TEXT        NOT NULL DEFAULT 'standard'
+    CHECK (vat_status IN ('standard', 'zero_rated', 'exempt')),  -- frozen snapshot of the item's VAT status at conversion time
   qty_fulfilled      NUMERIC(10,2) NOT NULL DEFAULT 0,
   is_stock_deducting BOOLEAN     NOT NULL DEFAULT true  -- false for labor/logistics summary lines (no role_key)
 );

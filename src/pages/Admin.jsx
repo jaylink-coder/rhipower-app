@@ -14,6 +14,19 @@ import AdminSuppliers from './AdminSuppliers.jsx'
 import AdminPurchaseOrders from './AdminPurchaseOrders.jsx'
 import AdminSalesOrders from './AdminSalesOrders.jsx'
 import AdminInvoices from './AdminInvoices.jsx'
+import AdminSettings from './AdminSettings.jsx'
+import { fetchOrgSettings, FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
+
+// KRA VAT categories — 'standard' (taxed at the org's VAT rate), 'zero_rated'
+// (taxed at 0%, still technically vatable) and 'exempt' (no VAT, no input
+// VAT claim) are genuinely different KRA treatments, not just "0% vs not" —
+// see migration 016's comment for why this is modeled per item rather than
+// as one org-wide rate.
+const VAT_STATUS_OPTIONS = [
+  { value: 'standard',    label: 'Standard-rated' },
+  { value: 'zero_rated',  label: 'Zero-rated' },
+  { value: 'exempt',      label: 'Exempt' },
+]
 
 // Panel/Inverter/Battery are no longer fixed 3-slot groups — any number of
 // products can exist per category, and tier is derived from price, not
@@ -217,11 +230,12 @@ function AddItemForm({ category, onAdded, session, cloneFrom }) {
         buying_price_kes: String(cloneFrom.buying_price_kes ?? ''),
         unit_weight_kg: cloneFrom.unit_weight_kg != null ? String(cloneFrom.unit_weight_kg) : '',
         capacity: cloneFrom[meta.capacityField] != null ? String(cloneFrom[meta.capacityField]) : '',
+        vat_status: cloneFrom.vat_status || 'standard',
       }
       specFields.forEach(s => { f[s.key] = cloneFrom[s.key] != null ? String(cloneFrom[s.key]) : '' })
       return f
     }
-    const f = { sku: '', description: '', buying_price_kes: '', unit_weight_kg: '', capacity: '' }
+    const f = { sku: '', description: '', buying_price_kes: '', unit_weight_kg: '', capacity: '', vat_status: 'standard' }
     specFields.forEach(s => { f[s.key] = '' })
     return f
   }
@@ -236,6 +250,7 @@ function AddItemForm({ category, onAdded, session, cloneFrom }) {
       role_key: roleKey, sku: form.sku.trim(), description: form.description.trim(),
       category, tier: 'balanced', unit: 'each',
       buying_price_kes: parseFloat(form.buying_price_kes),
+      vat_status: form.vat_status || 'standard',
     }
     if (form.unit_weight_kg) payload.unit_weight_kg = parseFloat(form.unit_weight_kg)
     if (form.capacity) payload[meta.capacityField] = parseFloat(form.capacity)
@@ -270,6 +285,13 @@ function AddItemForm({ category, onAdded, session, cloneFrom }) {
         <input placeholder="Weight (kg)" type="number" value={form.unit_weight_kg}
           onChange={e => setForm(f => ({ ...f, unit_weight_kg: e.target.value }))}
           className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
+      </div>
+      <div>
+        <label className="block text-xs text-gray-500 mb-1">VAT status</label>
+        <select value={form.vat_status} onChange={e => setForm(f => ({ ...f, vat_status: e.target.value }))}
+          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white">
+          {VAT_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
       </div>
       <div className="grid grid-cols-3 gap-2">
         {specFields.map(s => (
@@ -506,6 +528,7 @@ function ItemDetailModal({ row, category, onClose, onChanged, onCloneRequested, 
               <div className="flex justify-between"><span className="text-gray-400">Selling price</span><span className="font-bold text-emerald-700">{formatKsh(row.buying_price_kes * 1.35)}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Stock on hand</span><span className="font-bold">{row.stock_qty ?? 'Not tracked'}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Supplier</span><span className="font-bold">{row.supplier || '—'}</span></div>
+              <div className="flex justify-between"><span className="text-gray-400">VAT status</span><span className="font-bold">{VAT_STATUS_OPTIONS.find(o => o.value === (row.vat_status || 'standard'))?.label}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Status</span><span className="font-bold">{row.is_active === false ? 'Inactive' : 'Active'}{row.in_stock === false ? ' · Marked out of stock' : ''}</span></div>
             </div>
           )}
@@ -659,6 +682,7 @@ function InventoryTable({ session, invSection }) {
       stock_qty:     r.stock_qty     != null ? String(r.stock_qty)     : '',
       reorder_point: r.reorder_point != null ? String(r.reorder_point) : '',
       supplier:      r.supplier || '',
+      vat_status:    r.vat_status || 'standard',
       reason:        '',
     }
     // Product categories (panel/inverter/battery) also expose capacity,
@@ -684,6 +708,7 @@ function InventoryTable({ session, invSection }) {
       stock_qty:     form.stock_qty     === '' ? null : parseInt(form.stock_qty, 10),
       reorder_point: form.reorder_point === '' ? null : parseInt(form.reorder_point, 10),
       supplier:      (form.supplier || '').trim() || null,
+      vat_status:    form.vat_status || 'standard',
       updated_at:    new Date().toISOString(),
     }
     if (meta) {
@@ -869,6 +894,11 @@ function InventoryTable({ session, invSection }) {
                             <input type="text" placeholder="Supplier name" value={editingStock[item.key].supplier}
                               onChange={e => updateEditingStock(item.key, 'supplier', e.target.value)}
                               className="border-2 border-blue-400 rounded-lg px-2 py-1 text-xs outline-none" />
+                            <select value={editingStock[item.key].vat_status}
+                              onChange={e => updateEditingStock(item.key, 'vat_status', e.target.value)}
+                              className="border-2 border-blue-400 rounded-lg px-2 py-1 text-xs bg-white outline-none">
+                              {VAT_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                            </select>
                             <input type="text" placeholder="Reason for qty change (optional)" value={editingStock[item.key].reason}
                               onChange={e => updateEditingStock(item.key, 'reason', e.target.value)}
                               onKeyDown={e => { if (e.key === 'Enter') saveStock(item.key); if (e.key === 'Escape') cancelEditStock(item.key) }}
@@ -958,6 +988,7 @@ const SECTIONS = [
   { id: 'salesorders', label: '📑 Sales Orders' },
   { id: 'invoices',    label: '💵 Invoices' },
   { id: 'customers',   label: '👥 Customers' },
+  { id: 'settings',    label: '⚙️ Settings' },
 ]
 
 const INVENTORY_SUBS = [
@@ -978,6 +1009,13 @@ export default function Admin({ onBack }) {
     setActiveTab(tab)
     setFocusId(id)
   }
+  // Org settings (VAT rate, numbering prefixes, business info) — fetched
+  // once here since Admin renders as its own tree outside App.jsx, and
+  // passed down to every admin page that formats a document number or
+  // needs business contact info. Settings itself refetches after a save so
+  // every other tab reflects a change immediately, no reload needed.
+  const [business, setBusiness] = useState(BUSINESS_FALLBACK)
+  useEffect(() => { fetchOrgSettings().then(setBusiness) }, [])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session))
@@ -1057,13 +1095,14 @@ export default function Admin({ onBack }) {
 
         <div className="max-w-7xl px-4 py-6">
           {activeTab === 'home'        && <AdminHome session={session} onNavigate={navigateTo} />}
-          {activeTab === 'leads'       && <AdminLeads session={session} onNavigate={navigateTo} focusId={focusId} />}
+          {activeTab === 'leads'       && <AdminLeads session={session} onNavigate={navigateTo} focusId={focusId} business={business} />}
           {activeTab === 'inventory'   && <InventoryTable session={session} invSection={invSection} />}
           {activeTab === 'suppliers'   && <AdminSuppliers session={session} />}
-          {activeTab === 'purchasing'  && <AdminPurchaseOrders session={session} />}
-          {activeTab === 'salesorders' && <AdminSalesOrders session={session} onNavigate={navigateTo} focusId={focusId} />}
-          {activeTab === 'invoices'    && <AdminInvoices session={session} onNavigate={navigateTo} focusId={focusId} />}
+          {activeTab === 'purchasing'  && <AdminPurchaseOrders session={session} business={business} />}
+          {activeTab === 'salesorders' && <AdminSalesOrders session={session} onNavigate={navigateTo} focusId={focusId} business={business} />}
+          {activeTab === 'invoices'    && <AdminInvoices session={session} onNavigate={navigateTo} focusId={focusId} business={business} />}
           {activeTab === 'customers'   && <AdminCustomers session={session} />}
+          {activeTab === 'settings'    && <AdminSettings session={session} onSettingsChanged={setBusiness} />}
         </div>
       </div>
     </div>

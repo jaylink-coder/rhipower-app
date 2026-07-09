@@ -10,6 +10,8 @@ import { supabase } from '../lib/supabase.js'
 import { formatKsh } from '../lib/calculator.js'
 import { logAdminAction } from '../lib/auditLog.js'
 import { logStockMovement } from '../lib/inventory.js'
+import { formatDocNumber } from '../lib/docNumbers.js'
+import { FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
 
 const STATUS_OPTIONS = [
   { value: 'draft',               label: 'Draft',               color: 'bg-gray-100  text-gray-600'  },
@@ -103,7 +105,7 @@ function NewPOForm({ suppliers, items, onSave, onCancel, saving }) {
   )
 }
 
-function ReceiveLineRow({ po, line, item, session, onReceived }) {
+function ReceiveLineRow({ po, line, item, session, business, onReceived }) {
   const remaining = line.qty_ordered - line.qty_received
   const [qty, setQty] = useState(String(remaining))
   const [busy, setBusy] = useState(false)
@@ -122,7 +124,7 @@ function ReceiveLineRow({ po, line, item, session, onReceived }) {
       await logStockMovement({
         roleKey: line.role_key, quantityChanged: n, session,
         movementType: 'purchase', sourceType: 'purchase_order', sourceId: po.id,
-        reason: `Received against PO-${String(po.po_number).padStart(4, '0')}`,
+        reason: `Received against ${formatDocNumber(business.poPrefix, po.po_number)}`,
       })
       logAdminAction(session, 'po_line_received', po.id, { role_key: line.role_key, qty: n })
       onReceived({ lineId: line.id, qtyReceived: newQtyReceived, roleKey: line.role_key, newStock })
@@ -152,7 +154,7 @@ function ReceiveLineRow({ po, line, item, session, onReceived }) {
   )
 }
 
-export default function AdminPurchaseOrders({ session }) {
+export default function AdminPurchaseOrders({ session, business = BUSINESS_FALLBACK }) {
   const [pos,       setPos]       = useState([])
   const [suppliers, setSuppliers] = useState([])
   const [items,     setItems]     = useState({})
@@ -278,7 +280,7 @@ export default function AdminPurchaseOrders({ session }) {
             <button onClick={() => setExpanded(isOpen ? null : po.id)} className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-gray-50 transition">
               <span className={`text-xs font-bold px-2.5 py-1 rounded-full shrink-0 ${st.color}`}>{st.label}</span>
               <div className="flex-1 min-w-0">
-                <div className="font-black text-gray-800 truncate">PO-{String(po.po_number).padStart(4, '0')} · {supplier?.name || 'Unknown supplier'}</div>
+                <div className="font-black text-gray-800 truncate">{formatDocNumber(business.poPrefix, po.po_number)} · {supplier?.name || 'Unknown supplier'}</div>
                 <div className="text-xs text-gray-400 truncate">{lines.length} line item(s){po.expected_date ? ` · expected ${po.expected_date}` : ''}</div>
               </div>
               <div className="font-black text-gray-800 font-mono text-sm tabular-nums shrink-0">{formatKsh(po.total_kes || 0)}</div>
@@ -289,7 +291,7 @@ export default function AdminPurchaseOrders({ session }) {
               <div className="border-t border-gray-100 px-5 py-4 space-y-3 bg-gray-50">
                 <div className="bg-white rounded-xl p-3 divide-y divide-gray-50">
                   {lines.map(line => (
-                    <ReceiveLineRow key={line.id} po={po} line={line} item={items[line.role_key]} session={session}
+                    <ReceiveLineRow key={line.id} po={po} line={line} item={items[line.role_key]} session={session} business={business}
                       onReceived={change => handleLineReceived(po, change)} />
                   ))}
                 </div>

@@ -13,6 +13,7 @@ import { DEFAULT_CONFIG }     from './data/defaultSiteConfig.js'
 import { fetchSolarData }     from './lib/nasaPower.js'
 import { runCalculation }     from './lib/calculator.js'
 import { fetchInventory }     from './lib/inventory.js'
+import { fetchOrgSettings, FALLBACK as BUSINESS_FALLBACK } from './lib/orgSettings.js'
 import { supabase, isSupabaseReady } from './lib/supabase.js'
 import './App.css'
 
@@ -27,15 +28,17 @@ export default function App() {
   const [allResults,    setAllResults]    = useState(null)
   const [nasaLoading,   setNasaLoading]   = useState(false)
   const [inventory,     setInventory]     = useState(null)   // null = use hardcoded fallback
+  const [business,      setBusiness]      = useState(BUSINESS_FALLBACK)  // org_settings, once loaded
   const [showAdmin,     setShowAdmin]     = useState(false)
   const [showAccount,   setShowAccount]   = useState(false)
   const [customerUser,  setCustomerUser]  = useState(null)   // null = signed out
   const [showProfilePicker, setShowProfilePicker] = useState(false)  // step 0: homepage catalog vs. the 4-option picker
   const [packageBackupDays, setPackageBackupDays] = useState(null)   // carries a picked package's suggested backup days into Step 3
 
-  // Fetch live inventory prices from Supabase on first load
+  // Fetch live inventory prices and org settings from Supabase on first load
   useEffect(() => {
     fetchInventory().then(inv => setInventory(inv))
+    fetchOrgSettings().then(s => setBusiness(s))
   }, [])
 
   // Track the signed-in customer session (shared Supabase Auth client — if the
@@ -131,7 +134,7 @@ export default function App() {
   if (showAccount) {
     return customerUser
       ? <MyQuotes user={customerUser} onBack={() => setShowAccount(false)} onResume={handleResumeQuote} />
-      : <CustomerAuth onBack={() => setShowAccount(false)} onSignedIn={() => {}} />
+      : <CustomerAuth onBack={() => setShowAccount(false)} onSignedIn={() => {}} business={business} />
   }
 
   return (
@@ -194,6 +197,7 @@ export default function App() {
       {step === 0 && !showProfilePicker && (
         <Homepage
           inventory={inventory}
+          business={business}
           onSelectPackage={applyPackage}
           onCustomize={() => setShowProfilePicker(true)} />
       )}
@@ -234,6 +238,7 @@ export default function App() {
           clientProfile={clientProfile}
           inventory={inventory}
           customerUser={customerUser}
+          business={business}
           onBack={() => setStep(2)} />
       )}
     </div>

@@ -1,26 +1,48 @@
 // RhiPower — Sales Order → Invoice generation, and the overdue display check.
 //
 // Invoice lines are a SUMMARIZED view of a Sales Order's ~20 granular BOM
-// rows, grouped by zone into ~5 readable lines (one per zone + labour +
-// logistics) — a customer invoice should read like a project quote, not an
-// itemized fastener count. Each zone's SELL-price share is apportioned from
-// the Sales Order's materials_kes using that zone's BUYING-cost weight
-// (sales_order_lines.unit_cost_kes × qty), since the calculator only ever
-// produced one aggregate materials total, not a per-zone sell price.
+// rows, grouped by (zone, vat_status) into ~5-8 readable lines (one per
+// zone/tax-treatment combination + labour + logistics) — a customer invoice
+// should read like a project quote, not an itemized fastener count. Most
+// jobs have every item in a zone sharing the same vat_status, so this is
+// still ~5 lines in the common case; a genuinely mixed zone (say, a
+// zero-rated panel brand alongside standard-rated BOS hardware) splits into
+// more than one line rather than blending tax treatments together.
 //
-// VAT is backed out of the Sales Order's existing VAT-inclusive total
-// (subtotal = round(total / 1.16)) rather than added on top, so the
-// customer-facing total never changes at the invoice stage — only the
-// breakdown becomes itemized. vat_kes is the exact remainder so
-// subtotal + vat === total with no rounding drift.
+// Each zone/vat-status group's SELL-price share is apportioned from the
+// Sales Order's materials_kes using that group's BUYING-cost weight
+// (sales_order_lines.unit_cost_kes × qty), since the calculator only ever
+// produced one aggregate materials total, not a per-line sell price.
+//
+// VAT per line depends on org_settings.vatPricingMode:
+//   'inclusive' (the default, matching this app's existing behaviour) — the
+//     group's sell share is treated as ALREADY including VAT; standard-rated
+//     lines back the tax out (pretax = sell / (1 + rate)), so the invoice
+//     total never changes from what was quoted. zero_rated/exempt lines have
+//     no VAT to back out — the whole sell share is pretax.
+//   'exclusive' — the group's sell share is treated as a PRE-TAX amount;
+//     standard-rated lines have VAT added on top (vat = pretax * rate), so
+//     the invoice total can exceed what was quoted for the standard-rated
+//     portion. zero_rated/exempt lines are unaffected either way.
+// Each line's pretax/VAT amounts round independently to the nearest
+// shilling; the invoice's subtotal_kes/vat_kes/total_kes are the exact sums
+// of those rounded line values (total_kes = subtotal_kes + vat_kes always
+// holds), which can differ from the Sales Order's total by at most a few
+// shillings of rounding — not worth forcing an exact match at the cost of
+// a less transparent per-line breakdown.
 import { supabase } from './supabase.js'
 import { logAdminAction } from './auditLog.js'
 import { recordPayment } from './payments.js'
+import { fetchOrgSettings } from './orgSettings.js'
 
 const ZONE_DESCRIPTIONS = {
   zoneA: 'Solar Array & Combiner (Zone A)',
   zoneB: 'Battery Bank & Power Plant (Zone B)',
   zoneC: 'AC Distribution (Zone C)',
+}
+const VAT_STATUS_LABELS = {
+  zero_rated: 'Zero-rated',
+  exempt:     'Exempt',
 }
 
 export function isOverdue(invoice) {
@@ -30,34 +52,56 @@ export function isOverdue(invoice) {
 }
 
 export async function generateInvoiceFromSalesOrder(so, session) {
+  const settings = await fetchOrgSettings()
   const lines = so.sales_order_lines || []
-  const zoneBuyingCost = { zoneA: 0, zoneB: 0, zoneC: 0 }
-  lines.forEach(l => {
-    if (zoneBuyingCost[l.zone] != null) zoneBuyingCost[l.zone] += Number(l.unit_cost_kes || 0) * Number(l.qty || 0)
-  })
-  const totalZoneBuyingCost = zoneBuyingCost.zoneA + zoneBuyingCost.zoneB + zoneBuyingCost.zoneC
-  const evenShare = totalZoneBuyingCost > 0 ? null : Number(so.materials_kes || 0) / 3
 
-  const groups = [
-    { zone: 'zoneA', desc: ZONE_DESCRIPTIONS.zoneA, sell: evenShare ?? Number(so.materials_kes || 0) * (zoneBuyingCost.zoneA / totalZoneBuyingCost) },
-    { zone: 'zoneB', desc: ZONE_DESCRIPTIONS.zoneB, sell: evenShare ?? Number(so.materials_kes || 0) * (zoneBuyingCost.zoneB / totalZoneBuyingCost) },
-    { zone: 'zoneC', desc: ZONE_DESCRIPTIONS.zoneC, sell: evenShare ?? Number(so.materials_kes || 0) * (zoneBuyingCost.zoneC / totalZoneBuyingCost) },
-    { zone: 'labor',     desc: 'Installation Labour',        sell: Number(so.labor_kes || 0) },
-    { zone: 'logistics', desc: 'Logistics & Site Transport', sell: Number(so.logistics_kes || 0) },
+  // Group zone lines by (zone, vat_status) — usually one group per zone.
+  const groupMap = {}
+  lines.forEach(l => {
+    if (!ZONE_DESCRIPTIONS[l.zone]) return
+    const vatStatus = l.vat_status || 'standard'
+    const key = `${l.zone}|${vatStatus}`
+    if (!groupMap[key]) groupMap[key] = { zone: l.zone, vatStatus, buyingCost: 0 }
+    groupMap[key].buyingCost += Number(l.unit_cost_kes || 0) * Number(l.qty || 0)
+  })
+  const zoneGroups  = Object.values(groupMap)
+  const totalBuying = zoneGroups.reduce((s, g) => s + g.buyingCost, 0)
+  const materials   = Number(so.materials_kes || 0)
+  const zonesOfSameKind = zone => zoneGroups.filter(g => g.zone === zone).length
+
+  const sellGroups = [
+    ...zoneGroups.map(g => ({
+      vatStatus: g.vatStatus,
+      desc: ZONE_DESCRIPTIONS[g.zone] + (zonesOfSameKind(g.zone) > 1 && VAT_STATUS_LABELS[g.vatStatus] ? ` — ${VAT_STATUS_LABELS[g.vatStatus]}` : ''),
+      sell: totalBuying > 0 ? materials * (g.buyingCost / totalBuying) : materials / (zoneGroups.length || 1),
+    })),
+    { vatStatus: 'standard', desc: 'Installation Labour',        sell: Number(so.labor_kes || 0) },
+    { vatStatus: 'standard', desc: 'Logistics & Site Transport', sell: Number(so.logistics_kes || 0) },
   ]
 
-  const total    = Number(so.total_kes || 0)
-  const subtotal = Math.round(total / 1.16)
-  const vat      = total - subtotal
-  const totalSell = groups.reduce((s, g) => s + g.sell, 0) || 1
+  const rate = settings.vatRatePct / 100
+  const mode = settings.vatPricingMode  // 'inclusive' | 'exclusive'
 
-  let allocated = 0
-  const invoiceLines = groups.map((g, i) => {
-    const isLast = i === groups.length - 1
-    const amt = isLast ? (subtotal - allocated) : Math.round(subtotal * (g.sell / totalSell))
-    allocated += amt
-    return { description: g.desc, qty: 1, unit_price_kes: amt, sort_order: i }
+  let allocatedSubtotal = 0, allocatedVat = 0
+  const invoiceLines = sellGroups.map((g, i) => {
+    let pretax, vatAmt
+    if (g.vatStatus === 'standard') {
+      if (mode === 'exclusive') { pretax = g.sell; vatAmt = g.sell * rate }
+      else                      { pretax = g.sell / (1 + rate); vatAmt = g.sell - pretax }
+    } else {
+      pretax = g.sell
+      vatAmt = 0
+    }
+    pretax = Math.round(pretax)
+    vatAmt = Math.round(vatAmt)
+    allocatedSubtotal += pretax
+    allocatedVat      += vatAmt
+    return { description: g.desc, qty: 1, unit_price_kes: pretax, vat_status: g.vatStatus, vat_amount_kes: vatAmt, sort_order: i }
   })
+
+  const subtotal = allocatedSubtotal
+  const vat      = allocatedVat
+  const total    = subtotal + vat
 
   const { data: invoice, error } = await supabase.from('invoices').insert({
     sales_order_id:   so.id,
@@ -67,10 +111,10 @@ export async function generateInvoiceFromSalesOrder(so, session) {
     client_email:     so.client_email,
     site_address:     so.site_address,
     issue_date:       new Date().toISOString().slice(0, 10),
-    due_date:         new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+    due_date:         new Date(Date.now() + settings.invoiceDueDays * 86400000).toISOString().slice(0, 10),
     status:           'draft',
     subtotal_kes:     subtotal,
-    vat_rate_pct:     16,
+    vat_rate_pct:     settings.vatRatePct,
     vat_kes:          vat,
     total_kes:        total,
     admin_id:         session?.user?.id || null,
@@ -82,7 +126,7 @@ export async function generateInvoiceFromSalesOrder(so, session) {
     .insert(invoiceLines.map(l => ({ invoice_id: invoice.id, ...l }))).select().order('sort_order')
   if (lineErr) throw lineErr
 
-  logAdminAction(session, 'invoice_generated', invoice.id, { sales_order_id: so.id, total })
+  logAdminAction(session, 'invoice_generated', invoice.id, { sales_order_id: so.id, total, vat_pricing_mode: mode })
 
   // Auto-credit an existing completed booking deposit for this quote, if any,
   // so the invoice shows real progress from the moment it's created rather

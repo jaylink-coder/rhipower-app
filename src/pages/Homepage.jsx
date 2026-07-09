@@ -7,7 +7,7 @@ import { useMemo } from 'react'
 import { EXAMPLE_PACKAGES } from '../data/examplePackages.js'
 import { DEFAULT_APPLIANCES } from '../data/appliances.js'
 import { runCalculation } from '../lib/calculator.js'
-import { BUSINESS } from '../config.js'
+import { FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
 import { DEFAULT_CONFIG } from '../data/defaultSiteConfig.js'
 
 const TRUST_BADGES = [
@@ -24,7 +24,7 @@ const HOW_IT_WORKS = [
   { icon: '✅', label: 'Choose how to proceed',  desc: 'Supply Only, DIY spec sheet, or Full Turnkey' },
 ]
 
-export default function Homepage({ inventory, onSelectPackage, onCustomize }) {
+export default function Homepage({ inventory, onSelectPackage, onCustomize, business = BUSINESS_FALLBACK }) {
   const packagesWithPricing = useMemo(() => {
     return EXAMPLE_PACKAGES.map(pkg => {
       const siteConfig = { ...DEFAULT_CONFIG, tier: pkg.tier, backupDays: pkg.backupDays }
@@ -149,9 +149,9 @@ export default function Homepage({ inventory, onSelectPackage, onCustomize }) {
       <div className="bg-gray-900 text-white text-center px-4 py-10">
         <p className="font-black text-lg mb-1">Have questions before you start?</p>
         <p className="text-gray-400 text-sm mb-4">Talk to a RhiPower engineer directly on WhatsApp.</p>
-        <a href={`https://wa.me/${BUSINESS.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer"
+        <a href={`https://wa.me/${business.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer"
           className="inline-block bg-green-500 hover:bg-green-600 text-white font-bold px-6 py-3 rounded-xl transition">
-          💬 Chat on WhatsApp — {BUSINESS.whatsapp}
+          💬 Chat on WhatsApp — {business.whatsapp}
         </a>
       </div>
     </div>

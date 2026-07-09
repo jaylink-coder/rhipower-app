@@ -2,7 +2,7 @@
 // Client-side (jsPDF), so it works instantly with no server round-trip.
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { BUSINESS } from '../config.js'
+import { FALLBACK as BUSINESS_FALLBACK } from './orgSettings.js'
 import { TIER_META } from '../data/skuInventory.js'
 import { KENYA_LOCATIONS } from '../lib/nasaPower.js'
 
@@ -23,7 +23,7 @@ function tierName(tier) {
   return label.replace(/[^\x20-\x7E]/g, '').trim()
 }
 
-function addFooter(doc, pageNum, pageCount) {
+function addFooter(doc, business, pageNum, pageCount) {
   const w = doc.internal.pageSize.getWidth()
   const h = doc.internal.pageSize.getHeight()
   doc.setDrawColor(...GRAY)
@@ -31,7 +31,7 @@ function addFooter(doc, pageNum, pageCount) {
   doc.line(14, h - 16, w - 14, h - 16)
   doc.setFontSize(8)
   doc.setTextColor(...GRAY)
-  doc.text(`${BUSINESS.name} · ${BUSINESS.whatsapp} · ${BUSINESS.email}`, 14, h - 10)
+  doc.text(`${business.businessName} · ${business.whatsapp} · ${business.email}`, 14, h - 10)
   doc.text(`Page ${pageNum} of ${pageCount}`, w - 14, h - 10, { align: 'right' })
 }
 
@@ -46,7 +46,7 @@ function sectionHeading(doc, text, y) {
   return y + 12
 }
 
-export function generateProposalPDF({ client, siteConfig, results, tier, backupDays }) {
+export function generateProposalPDF({ client, siteConfig, results, tier, backupDays, business = BUSINESS_FALLBACK }) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
   const loc   = KENYA_LOCATIONS[siteConfig.location]?.label || siteConfig.location
@@ -58,11 +58,11 @@ export function generateProposalPDF({ client, siteConfig, results, tier, backupD
   doc.setTextColor(255, 255, 255)
   doc.setFontSize(20)
   doc.setFont(undefined, 'bold')
-  doc.text(BUSINESS.name, 14, 15)
+  doc.text(business.businessName, 14, 15)
   doc.setFontSize(9)
   doc.setFont(undefined, 'normal')
-  doc.text(BUSINESS.tagline, 14, 22)
-  doc.text(`${BUSINESS.whatsapp}  ·  ${BUSINESS.email}  ·  ${BUSINESS.city}`, 14, 27.5)
+  doc.text(business.tagline, 14, 22)
+  doc.text(`${business.whatsapp}  ·  ${business.email}  ·  ${business.city}`, 14, 27.5)
 
   doc.setFontSize(10)
   doc.setTextColor(255, 220, 150)
@@ -200,7 +200,10 @@ export function generateProposalPDF({ client, siteConfig, results, tier, backupD
 
   doc.setFontSize(8)
   doc.setTextColor(...GRAY)
-  doc.text(`Prices inclusive of 16% VAT · Subject to site survey · ${backupDays}-day backup · ${tierName(tier)}`, 14, y)
+  const vatLine = business.vatPricingMode === 'exclusive'
+    ? `Prices exclusive of VAT — plus ${business.vatRatePct}% at invoicing`
+    : `Prices inclusive of ${business.vatRatePct}% VAT`
+  doc.text(`${vatLine} · Subject to site survey · ${backupDays}-day backup · ${tierName(tier)}`, 14, y)
   y += 4.5
   doc.text('Warranty: 25-year panels · 10-year inverter · 10-year battery · 2-year installation workmanship', 14, y)
   y += 8
@@ -219,7 +222,7 @@ export function generateProposalPDF({ client, siteConfig, results, tier, backupD
   const pageCount = doc.internal.getNumberOfPages()
   for (let p = 1; p <= pageCount; p++) {
     doc.setPage(p)
-    addFooter(doc, p, pageCount)
+    addFooter(doc, business, p, pageCount)
   }
 
   const safeLoc = String(loc).replace(/[^a-z0-9]+/gi, '-')

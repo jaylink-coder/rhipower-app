@@ -3,6 +3,8 @@ import { supabase } from '../lib/supabase.js'
 import { formatKsh } from '../lib/calculator.js'
 import { logAdminAction } from '../lib/auditLog.js'
 import { convertQuoteToSalesOrder } from '../lib/salesOrders.js'
+import { formatDocNumber } from '../lib/docNumbers.js'
+import { FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
 import SiteVisitsPanel from '../components/SiteVisitsPanel.jsx'
 
 const SO_ELIGIBLE_STATUSES = ['proposal_accepted', 'installed']
@@ -20,7 +22,7 @@ const TIER_LABELS = { premium: '⭐ Premium', balanced: '✅ Balanced', budget: 
 const PATH_LABELS = { buy: '🛒 Supply Only', diy: '🔧 DIY', book: '👷 Full Turnkey' }
 const PROF_LABELS = { homeowner: '🏠 Homeowner', diy: '🔌 DIY', professional: '⚡ Engineer', business: '🏢 Business' }
 
-export default function AdminLeads({ session, onNavigate, focusId }) {
+export default function AdminLeads({ session, onNavigate, focusId, business = BUSINESS_FALLBACK }) {
   const [leads,         setLeads]         = useState([])
   const [deposits,      setDeposits]      = useState({})   // quotation_id -> deposit_transactions row
   const [salesOrders,   setSalesOrders]   = useState({})   // quotation_id -> sales_orders row
@@ -249,7 +251,7 @@ export default function AdminLeads({ session, onNavigate, focusId }) {
                     {salesOrders[lead.id] ? (
                       <button onClick={() => onNavigate?.('salesorders', salesOrders[lead.id].id)}
                         className="underline decoration-dotted hover:text-purple-900 text-left">
-                        📑 SO-{String(salesOrders[lead.id].so_number).padStart(4, '0')} — status: {salesOrders[lead.id].status.replace(/_/g, ' ')} (view →)
+                        📑 {formatDocNumber(business.soPrefix, salesOrders[lead.id].so_number)} — status: {salesOrders[lead.id].status.replace(/_/g, ' ')} (view →)
                       </button>
                     ) : (
                       <>

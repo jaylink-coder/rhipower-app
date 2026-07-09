@@ -9,6 +9,8 @@ import { isOverdue } from '../lib/invoices.js'
 import { recordPayment } from '../lib/payments.js'
 import { generateInvoicePDF } from '../lib/pdfInvoice.js'
 import { logAdminAction } from '../lib/auditLog.js'
+import { formatDocNumber } from '../lib/docNumbers.js'
+import { FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
 
 const STATUS_OPTIONS = [
   { value: 'draft',           label: 'Draft',           color: 'bg-gray-100   text-gray-600'  },
@@ -25,11 +27,6 @@ const METHODS = [
   { value: 'cash',          label: 'Cash' },
   { value: 'cheque',        label: 'Cheque' },
 ]
-
-function invoiceNumber(inv) {
-  const year = new Date(inv.issue_date || inv.created_at).getFullYear()
-  return `INV-${year}-${String(inv.invoice_number).padStart(4, '0')}`
-}
 
 function RecordPaymentForm({ invoice, session, onRecorded }) {
   const [amount,    setAmount]    = useState(String(invoice.balance_due_kes || ''))
@@ -75,7 +72,7 @@ function RecordPaymentForm({ invoice, session, onRecorded }) {
   )
 }
 
-export default function AdminInvoices({ session, onNavigate, focusId }) {
+export default function AdminInvoices({ session, onNavigate, focusId, business = BUSINESS_FALLBACK }) {
   const [invoices, setInvoices] = useState([])
   const [payments, setPayments] = useState({})  // invoice_id -> payments[]
   const [loading,  setLoading]  = useState(true)
@@ -119,7 +116,11 @@ export default function AdminInvoices({ session, onNavigate, focusId }) {
   }
 
   function downloadPDF(inv) {
-    generateInvoicePDF({ invoice: inv, lines: (inv.invoice_lines || []).slice().sort((a,b) => a.sort_order - b.sort_order), payments: payments[inv.id] || [] })
+    generateInvoicePDF({ invoice: inv, lines: (inv.invoice_lines || []).slice().sort((a,b) => a.sort_order - b.sort_order), payments: payments[inv.id] || [], business })
+  }
+
+  function invoiceNumber(inv) {
+    return formatDocNumber(business.invoicePrefix, inv.invoice_number, { year: new Date(inv.issue_date || inv.created_at).getFullYear() })
   }
 
   const filtered = filter === 'all' ? invoices

@@ -28,6 +28,7 @@ export function toProduct(row) {
     itemCode:         row.item_code != null ? Number(row.item_code) : undefined,
     inStock:          row.in_stock !== false,
     isActive:         row.is_active !== false,
+    vatStatus:        row.vat_status || 'standard',
   }
 }
 
@@ -77,9 +78,9 @@ export async function fetchInventory() {
 
     function zoneItem(key, def) {
       const r = byKey[key]
-      const base = { ...def, roleKey: key }
+      const base = { ...def, roleKey: key, vatStatus: def.vatStatus || 'standard' }
       if (!r) return base
-      return { ...base, sku: r.sku, description: r.description, cost: Number(r.buying_price_kes) }
+      return { ...base, sku: r.sku, description: r.description, cost: Number(r.buying_price_kes), vatStatus: r.vat_status || 'standard' }
     }
 
     // Any number of products per category — tier is derived from price, not

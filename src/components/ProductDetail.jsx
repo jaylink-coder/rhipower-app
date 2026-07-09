@@ -6,9 +6,9 @@
 // system, never standalone).
 import { formatKsh } from '../lib/calculator.js'
 import { productSpecRows, CATEGORY_ICON, CATEGORY_LABEL } from '../lib/productSpecs.js'
-import { BUSINESS } from '../config.js'
+import { FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
 
-export default function ProductDetail({ category, product, isSelected, onSelect, onBack }) {
+export default function ProductDetail({ category, product, isSelected, onSelect, onBack, business = BUSINESS_FALLBACK }) {
   const specs = productSpecRows(category, product)
 
   return (
@@ -65,7 +65,7 @@ export default function ProductDetail({ category, product, isSelected, onSelect,
               className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 text-white font-black py-3.5 rounded-xl transition">
               {isSelected ? '✓ Already Selected' : 'Select This Option'}
             </button>
-            <a href={`https://wa.me/${BUSINESS.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Question about ${product.description}`)}`}
+            <a href={`https://wa.me/${business.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Question about ${product.description}`)}`}
               target="_blank" rel="noreferrer"
               className="px-4 border-2 border-gray-200 rounded-xl text-gray-500 hover:bg-gray-50 font-bold transition flex items-center">
               💬

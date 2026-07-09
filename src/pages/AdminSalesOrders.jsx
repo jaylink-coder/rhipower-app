@@ -12,6 +12,8 @@ import { logAdminAction } from '../lib/auditLog.js'
 import { logStockMovement } from '../lib/inventory.js'
 import { generateInvoiceFromSalesOrder } from '../lib/invoices.js'
 import { syncLeadStatusToInstalled } from '../lib/salesOrders.js'
+import { formatDocNumber } from '../lib/docNumbers.js'
+import { FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
 
 const STATUS_OPTIONS = [
   { value: 'draft',                label: 'Draft',                color: 'bg-gray-100  text-gray-600'  },
@@ -67,7 +69,7 @@ function FulfillLineRow({ so, line, item, session, onFulfilled }) {
   )
 }
 
-export default function AdminSalesOrders({ session, onNavigate, focusId }) {
+export default function AdminSalesOrders({ session, onNavigate, focusId, business = BUSINESS_FALLBACK }) {
   const [sos,      setSos]      = useState([])
   const [items,    setItems]    = useState({})
   const [invoices, setInvoices] = useState({})  // sales_order_id -> invoices row
@@ -91,7 +93,7 @@ export default function AdminSalesOrders({ session, onNavigate, focusId }) {
     const [{ data: soRows }, { data: itemRows }, { data: invRows }] = await Promise.all([
       supabase.from('sales_orders').select('*, sales_order_lines(*)').order('created_at', { ascending: false }),
       supabase.from('inventory_prices').select('role_key, description, stock_qty, is_active'),
-      supabase.from('invoices').select('id, sales_order_id, invoice_number, status'),
+      supabase.from('invoices').select('id, sales_order_id, invoice_number, issue_date, status'),
     ])
     setSos(soRows || [])
     const m = {}
@@ -115,7 +117,7 @@ export default function AdminSalesOrders({ session, onNavigate, focusId }) {
     setBusyInvoice(p => ({ ...p, [so.id]: false }))
   }
 
-  function poNumber(so) { return `SO-${String(so.so_number).padStart(4, '0')}` }
+  function soNumber(so) { return formatDocNumber(business.soPrefix, so.so_number) }
 
   async function confirmSO(so, force = false) {
     const deductingLines = (so.sales_order_lines || []).filter(l => l.is_stock_deducting && l.role_key)
@@ -138,7 +140,7 @@ export default function AdminSalesOrders({ session, onNavigate, focusId }) {
       await logStockMovement({
         roleKey: line.role_key, quantityChanged: -line.qty, session,
         movementType: 'reservation', sourceType: 'sales_order', sourceId: so.id,
-        reason: `Reserved for ${poNumber(so)}`,
+        reason: `Reserved for ${soNumber(so)}`,
       })
       stockUpdates[line.role_key] = newStock
     }
@@ -162,7 +164,7 @@ export default function AdminSalesOrders({ session, onNavigate, focusId }) {
         await logStockMovement({
           roleKey: line.role_key, quantityChanged: line.qty, session,
           movementType: 'reservation_release', sourceType: 'sales_order', sourceId: so.id,
-          reason: `Cancelled ${poNumber(so)}`,
+          reason: `Cancelled ${soNumber(so)}`,
         })
         setItems(p => ({ ...p, [line.role_key]: { ...p[line.role_key], stock_qty: newStock } }))
       }
@@ -216,7 +218,7 @@ export default function AdminSalesOrders({ session, onNavigate, focusId }) {
           await logStockMovement({
             roleKey: line.role_key, quantityChanged: -line.qty, session,
             movementType: 'reservation', sourceType: 'sales_order', sourceId: so.id,
-            reason: `Reserved for ${poNumber(so)} (fast-track)`,
+            reason: `Reserved for ${soNumber(so)} (fast-track)`,
           })
         }
         await supabase.from('sales_orders').update({ status: 'confirmed', updated_at: new Date().toISOString() }).eq('id', so.id)
@@ -292,7 +294,7 @@ export default function AdminSalesOrders({ session, onNavigate, focusId }) {
             <button onClick={() => setExpanded(isOpen ? null : so.id)} className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-gray-50 transition">
               <span className={`text-xs font-bold px-2.5 py-1 rounded-full shrink-0 ${st.color}`}>{st.label}</span>
               <div className="flex-1 min-w-0">
-                <div className="font-black text-gray-800 truncate">{poNumber(so)} · {so.client_name}</div>
+                <div className="font-black text-gray-800 truncate">{soNumber(so)} · {so.client_name}</div>
                 <div className="text-xs text-gray-400 truncate">{lines.length} line item(s) · {so.client_phone}</div>
               </div>
               <div className="font-black text-gray-800 font-mono text-sm tabular-nums shrink-0">{formatKsh(so.total_kes || 0)}</div>
@@ -353,7 +355,7 @@ export default function AdminSalesOrders({ session, onNavigate, focusId }) {
                     invoices[so.id] ? (
                       <button onClick={() => onNavigate?.('invoices', invoices[so.id].id)}
                         className="text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 px-3 py-2 rounded-lg transition">
-                        📄 INV-{invoices[so.id].invoice_number} — {invoices[so.id].status.replace(/_/g, ' ')} (view →)
+                        📄 {formatDocNumber(business.invoicePrefix, invoices[so.id].invoice_number, { year: new Date(invoices[so.id].issue_date).getFullYear() })} — {invoices[so.id].status.replace(/_/g, ' ')} (view →)
                       </button>
                     ) : (
                       <button onClick={() => handleGenerateInvoice(so)} disabled={busyInvoice[so.id]}
