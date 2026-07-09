@@ -20,6 +20,22 @@ import { formatKsh } from '../lib/calculator.js'
 import { logAdminAction } from '../lib/auditLog.js'
 import { formatDocNumber } from '../lib/docNumbers.js'
 import { FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
+import { generateStatementPDF } from '../lib/pdfStatement.js'
+
+const RANGE_OPTIONS = [
+  { value: 'this_month', label: 'This Month' },
+  { value: 'last_month', label: 'Last Month' },
+  { value: 'this_year',  label: 'This Year' },
+  { value: 'all',        label: 'All Time' },
+]
+
+function rangeBounds(value) {
+  const now = new Date()
+  if (value === 'this_month') return { start: new Date(now.getFullYear(), now.getMonth(), 1), end: null }
+  if (value === 'last_month') return { start: new Date(now.getFullYear(), now.getMonth() - 1, 1), end: new Date(now.getFullYear(), now.getMonth(), 1) }
+  if (value === 'this_year')  return { start: new Date(now.getFullYear(), 0, 1), end: null }
+  return { start: null, end: null }
+}
 
 const LEAD_STATUS_COLORS = {
   new: 'bg-blue-100 text-blue-800', contacted: 'bg-yellow-100 text-yellow-800', site_surveyed: 'bg-purple-100 text-purple-800',
@@ -39,6 +55,8 @@ function CustomerDetailModal({ row, onClose, onNavigate, business, onToggled, to
   const [leads,       setLeads]       = useState(null)
   const [salesOrders, setSalesOrders] = useState(null)
   const [invoices,    setInvoices]    = useState(null)
+  const [payments,    setPayments]    = useState(null)
+  const [range,       setRange]       = useState('this_year')
 
   useEffect(() => {
     Promise.all([
@@ -52,6 +70,13 @@ function CustomerDetailModal({ row, onClose, onNavigate, business, onToggled, to
       setLeads(leadsRes.data || [])
       setSalesOrders(soRes.data || [])
       setInvoices(invRes.data || [])
+      const invoiceIds = (invRes.data || []).map(i => i.id)
+      if (invoiceIds.length) {
+        supabase.from('payments').select('invoice_id, amount_kes, paid_at, method, reference')
+          .in('invoice_id', invoiceIds).then(({ data }) => setPayments(data || []))
+      } else {
+        setPayments([])
+      }
     })
   }, [row.id])
 
@@ -65,6 +90,27 @@ function CustomerDetailModal({ row, onClose, onNavigate, business, onToggled, to
     onNavigate?.(tabId, id)
     onClose()
   }
+
+  // Statement ledger — every non-void invoice (debit) and every payment
+  // against one (credit), sorted oldest-first, with a running balance.
+  // Entries dated before the selected range collapse into an opening
+  // balance rather than disappearing, so the closing balance always ties
+  // out to the customer's real total outstanding regardless of range.
+  const { start: rangeStart, end: rangeEnd } = rangeBounds(range)
+  const ledgerEntries = (() => {
+    if (!invoices || !payments) return null
+    const all = [
+      ...nonVoidInvoices.map(i => ({ date: i.issue_date, description: `Invoice ${formatDocNumber(business.invoicePrefix, i.invoice_number, { year: new Date(i.issue_date).getFullYear() })}`, debit: Number(i.total_kes || 0), credit: 0 })),
+      ...payments.filter(p => nonVoidInvoices.some(i => i.id === p.invoice_id)).map(p => ({ date: p.paid_at, description: `Payment${p.reference ? ` — ${p.reference}` : ''} (${(p.method || '').replace(/_/g, ' ')})`, debit: 0, credit: Number(p.amount_kes || 0) })),
+    ].sort((a, b) => new Date(a.date) - new Date(b.date))
+
+    const before = rangeStart ? all.filter(e => new Date(e.date) < rangeStart) : []
+    const inRange = all.filter(e => (!rangeStart || new Date(e.date) >= rangeStart) && (!rangeEnd || new Date(e.date) < rangeEnd))
+    const opening = before.reduce((s, e) => s + e.debit - e.credit, 0)
+    let running = opening
+    const entries = inRange.map(e => { running += e.debit - e.credit; return { ...e, balance: running } })
+    return { entries, opening, closing: running }
+  })()
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
@@ -80,7 +126,7 @@ function CustomerDetailModal({ row, onClose, onNavigate, business, onToggled, to
         </div>
 
         <div className="flex gap-1 px-5 pt-3 border-b border-gray-100">
-          {[['overview', 'Overview'], ['leads', `Leads & Quotes${leads ? ` (${leads.length})` : ''}`], ['salesorders', `Sales Orders${salesOrders ? ` (${salesOrders.length})` : ''}`], ['invoices', `Invoices${invoices ? ` (${invoices.length})` : ''}`]].map(([id, label]) => (
+          {[['overview', 'Overview'], ['leads', `Leads & Quotes${leads ? ` (${leads.length})` : ''}`], ['salesorders', `Sales Orders${salesOrders ? ` (${salesOrders.length})` : ''}`], ['invoices', `Invoices${invoices ? ` (${invoices.length})` : ''}`], ['statement', 'Statement']].map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)}
               className={`px-3 py-2 text-sm font-bold border-b-2 transition ${tab === id ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
               {label}
@@ -160,6 +206,63 @@ function CustomerDetailModal({ row, onClose, onNavigate, business, onToggled, to
                   </div>
                 </button>
               ))}
+            </div>
+          )}
+
+          {tab === 'statement' && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <select value={range} onChange={e => setRange(e.target.value)}
+                  className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white font-semibold">
+                  {RANGE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                {ledgerEntries && (
+                  <button
+                    onClick={() => generateStatementPDF({
+                      customer: { name: row.full_name, phone: latestQuote?.client_phone },
+                      entries: ledgerEntries.entries, openingBalance: ledgerEntries.opening, closingBalance: ledgerEntries.closing,
+                      rangeLabel: RANGE_OPTIONS.find(o => o.value === range)?.label, business,
+                    })}
+                    className="text-xs font-bold bg-gray-800 hover:bg-gray-700 text-white px-3 py-1.5 rounded-lg transition">
+                    ⬇ Download PDF
+                  </button>
+                )}
+              </div>
+
+              {!ledgerEntries ? <div className="text-xs text-gray-400">Loading…</div> : (
+                <>
+                  <div className="flex justify-between text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
+                    <span>Opening Balance: <strong>{formatKsh(ledgerEntries.opening)}</strong></span>
+                    <span>Closing Balance: <strong className={ledgerEntries.closing > 0 ? 'text-red-600' : ''}>{formatKsh(ledgerEntries.closing)}</strong></span>
+                  </div>
+                  {ledgerEntries.entries.length === 0 ? (
+                    <div className="text-xs text-gray-400 italic">No transactions in this period.</div>
+                  ) : (
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-gray-400 uppercase border-b border-gray-100">
+                          <th className="text-left py-1.5">Date</th>
+                          <th className="text-left py-1.5">Description</th>
+                          <th className="text-right py-1.5">Debit</th>
+                          <th className="text-right py-1.5">Credit</th>
+                          <th className="text-right py-1.5">Balance</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {ledgerEntries.entries.map((e, i) => (
+                          <tr key={i}>
+                            <td className="py-1.5 text-gray-500">{new Date(e.date).toLocaleDateString('en-KE', { day: '2-digit', month: 'short' })}</td>
+                            <td className="py-1.5 text-gray-700">{e.description}</td>
+                            <td className="py-1.5 text-right font-mono">{e.debit ? formatKsh(e.debit) : '—'}</td>
+                            <td className="py-1.5 text-right font-mono text-green-700">{e.credit ? formatKsh(e.credit) : '—'}</td>
+                            <td className="py-1.5 text-right font-mono font-bold">{formatKsh(e.balance)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </>
+              )}
             </div>
           )}
         </div>
