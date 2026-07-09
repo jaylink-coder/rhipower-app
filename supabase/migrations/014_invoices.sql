@@ -5,23 +5,16 @@
 -- Sales Order, working toward replacing Zoho Invoice.
 --
 -- VAT is itemized starting HERE, not retrofitted onto quotes/Sales Orders —
--- those stay a single headline number, so existing/pending customers never
--- see a price change. Each invoice_line now carries its OWN vat_status and
--- vat_amount_kes (see lib/invoices.js) — a Sales Order's BOM lines already
--- each freeze their item's vat_status (standard/zero_rated/exempt) as of
--- migration 013, and invoice generation groups by (zone, vat_status) so a
--- genuinely mixed zone splits into more than one line rather than blending
--- tax treatments together. Whether subtotal_kes is derived by backing VAT
--- out of, or adding VAT on top of, the Sales Order's total depends on
--- org_settings.vat_pricing_mode ('inclusive' backs out — the existing
--- default behaviour, no price change; 'exclusive' adds VAT on top of what
--- was quoted, matching what "exclusive pricing" means everywhere else).
+-- those stay VAT-inclusive as a single headline number (matching the
+-- existing customer-facing proposal PDF's "Prices inclusive of 16% VAT"
+-- convention), so existing/pending customers never see a price change.
+-- subtotal_kes is derived by backing 16% out of the Sales Order's total,
+-- not added on top.
 --
 -- invoice_lines is a deliberately SUMMARIZED view of a Sales Order's ~20
--- granular BOM rows — grouped into ~5-8 lines (one per zone/vat-status
--- combination + labour + logistics) by generateInvoiceFromSalesOrder() in
--- lib/invoices.js — so a customer sees a readable invoice, not an itemized
--- fastener count.
+-- granular BOM rows — grouped into ~5 lines (one per zone + labour +
+-- logistics) by generateInvoiceFromSalesOrder() in lib/invoices.js — so a
+-- customer sees a readable invoice, not an itemized fastener count.
 -- =========================================================
 
 CREATE TABLE IF NOT EXISTS invoices (
@@ -43,9 +36,9 @@ CREATE TABLE IF NOT EXISTS invoices (
   -- for the live check) — there's no cron in this backend-less app to flip it
   -- automatically, so the UI treats "sent/partially_paid + past due_date" as
   -- overdue for display without requiring the stored status to change.
-  subtotal_kes     NUMERIC(12,2) NOT NULL DEFAULT 0,  -- pre-VAT (sum of invoice_lines.line_total_kes)
-  vat_rate_pct     NUMERIC(5,2)  NOT NULL DEFAULT 16,  -- the STANDARD rate applied to standard-rated lines on this invoice, frozen at generation time
-  vat_kes          NUMERIC(12,2) NOT NULL DEFAULT 0,   -- sum of invoice_lines.vat_amount_kes
+  subtotal_kes     NUMERIC(12,2) NOT NULL DEFAULT 0,  -- pre-VAT
+  vat_rate_pct     NUMERIC(5,2)  NOT NULL DEFAULT 16,
+  vat_kes          NUMERIC(12,2) NOT NULL DEFAULT 0,
   total_kes        NUMERIC(12,2) NOT NULL DEFAULT 0,  -- subtotal + vat
   amount_paid_kes  NUMERIC(12,2) NOT NULL DEFAULT 0,  -- denormalised sum of payments, kept in sync by lib/payments.js
   balance_due_kes  NUMERIC(12,2) GENERATED ALWAYS AS (total_kes - amount_paid_kes) STORED,
@@ -65,9 +58,6 @@ CREATE TABLE IF NOT EXISTS invoice_lines (
   qty            NUMERIC(10,2) NOT NULL DEFAULT 1,
   unit_price_kes NUMERIC(12,2) NOT NULL,  -- pre-VAT unit price
   line_total_kes NUMERIC(12,2) GENERATED ALWAYS AS (qty * unit_price_kes) STORED,
-  vat_status     TEXT        NOT NULL DEFAULT 'standard'
-    CHECK (vat_status IN ('standard', 'zero_rated', 'exempt')),
-  vat_amount_kes NUMERIC(12,2) NOT NULL DEFAULT 0,  -- 0 for zero_rated/exempt lines by definition
   sort_order     INTEGER     NOT NULL DEFAULT 0
 );
 
