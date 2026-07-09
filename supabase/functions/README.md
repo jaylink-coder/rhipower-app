@@ -28,8 +28,11 @@ which Supabase auto-provides to every function in the project already.
 
 ## invite-customer
 Lets an admin add a customer manually from Customers -> "+ Add Customer", instead
-of relying entirely on self-signup. Same caller-verification pattern as
-invite-admin, but doesn't insert into `customer_profiles` itself — migration 003's
+of relying entirely on self-signup. Two modes, chosen in the UI: "Create Account
+Now" (admin sets a password, account is fully active immediately — no email
+round-trip) or "Send Invite Email" (Supabase's built-in invite link, customer
+sets their own password). Same caller-verification pattern as invite-admin, but
+doesn't insert into `customer_profiles` itself — migration 003's
 `handle_new_customer` trigger already does that automatically on every new
 auth.users row.
 

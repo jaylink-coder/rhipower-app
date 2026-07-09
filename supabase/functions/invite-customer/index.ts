@@ -7,13 +7,21 @@
 //      SUPABASE_SERVICE_ROLE_KEY, already provided to every function.
 //   3. Called from the app via supabase.functions.invoke('invite-customer', { body: {...} })
 //
-// Unlike invite-admin, this does NOT insert into a profile table itself —
-// migration 003's handle_new_customer trigger already does that
-// automatically on every new auth.users row, reading full_name out of
-// raw_user_meta_data. This function's only job is creating that auth user
-// (which, like admin invites, requires service-role — the client can't do
-// it) and sending Supabase's built-in invite email so the customer can set
-// their own password.
+// Two modes, since "send an email and hope they follow through" isn't
+// always practical (a walk-in or phone-order customer may not check email
+// right away, or at all):
+//   mode: 'invite' — auth.admin.inviteUserByEmail sends Supabase's built-in
+//     invite email; the account exists immediately but has no password
+//     until the customer clicks the link and sets one.
+//   mode: 'create' — auth.admin.createUser with an admin-supplied password
+//     and email_confirm: true creates a fully active account right away —
+//     no email round-trip. The admin is responsible for relaying the
+//     password to the customer themselves (it's returned once in the
+//     response so they can copy it — never stored or logged anywhere).
+//
+// Neither mode inserts into a profile table itself — migration 003's
+// handle_new_customer trigger already does that automatically on every new
+// auth.users row, reading full_name out of the user's metadata.
 //
 // Runs with service-role power, so — same as invite-admin — it verifies the
 // CALLER is an admin before doing anything, since service role bypasses RLS.
@@ -53,7 +61,7 @@ serve(async (req: Request) => {
       .from('admin_profiles').select('id').eq('id', caller.id).maybeSingle()
     if (!callerProfile) return json({ error: 'Only an admin can add a customer' }, 403)
 
-    const { email, fullName } = await req.json()
+    const { email, fullName, mode, password } = await req.json()
     if (!email || typeof email !== 'string' || !email.includes('@')) {
       return json({ error: 'Enter a valid email address' }, 400)
     }
@@ -63,6 +71,23 @@ serve(async (req: Request) => {
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     )
+
+    if (mode === 'create') {
+      if (!password || typeof password !== 'string' || password.length < 6) {
+        return json({ error: 'Password must be at least 6 characters' }, 400)
+      }
+      const { data: created, error: createErr } = await admin.auth.admin.createUser({
+        email: cleanEmail,
+        password,
+        email_confirm: true,
+        user_metadata: { full_name: fullName?.trim() || null },
+      })
+      if (createErr || !created?.user) {
+        console.error('createUser failed:', createErr)
+        return json({ error: createErr?.message || 'Could not create account' }, 500)
+      }
+      return json({ message: `Account created for ${cleanEmail}. Password: ${password} — share this with the customer now, it won't be shown again.` })
+    }
 
     const { data: invited, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(cleanEmail, {
       data: { full_name: fullName?.trim() || null },

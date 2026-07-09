@@ -277,8 +277,11 @@ export default function AdminCustomers({ session, onNavigate, business = BUSINES
   const [toggling,   setToggling] = useState({})
   const [viewing,    setViewing]  = useState(null)
   const [adding,     setAdding]   = useState(false)
+  const [addMode,     setAddMode]     = useState('create')  // 'create' (immediate, admin-set password) | 'invite' (email link)
   const [newEmail,    setNewEmail]    = useState('')
   const [newFullName, setNewFullName] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [inviting,    setInviting]    = useState(false)
   const [inviteMsg,   setInviteMsg]   = useState(null)
 
@@ -315,18 +318,29 @@ export default function AdminCustomers({ session, onNavigate, business = BUSINES
     }
   }
 
-  async function inviteCustomer() {
+  function generatePassword() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+    const pw = Array.from(crypto.getRandomValues(new Uint32Array(10))).map(n => chars[n % chars.length]).join('')
+    setNewPassword(pw)
+    setShowPassword(true)
+  }
+
+  async function addCustomer() {
     if (!newEmail.trim()) return
+    if (addMode === 'create' && newPassword.length < 6) {
+      setInviteMsg({ ok: false, text: 'Password must be at least 6 characters — use Generate for a random one.' })
+      return
+    }
     setInviting(true); setInviteMsg(null)
     const { data, error } = await supabase.functions.invoke('invite-customer', {
-      body: { email: newEmail.trim(), fullName: newFullName.trim() },
+      body: { email: newEmail.trim(), fullName: newFullName.trim(), mode: addMode, password: addMode === 'create' ? newPassword : undefined },
     })
     setInviting(false)
     if (error || data?.error) {
-      setInviteMsg({ ok: false, text: data?.error || error.message || 'Invite failed.' })
+      setInviteMsg({ ok: false, text: data?.error || error.message || 'Could not add customer.' })
     } else {
       setInviteMsg({ ok: true, text: data.message })
-      setNewEmail(''); setNewFullName('')
+      setNewEmail(''); setNewFullName(''); setNewPassword(''); setShowPassword(false)
       load()
     }
   }
@@ -346,16 +360,44 @@ export default function AdminCustomers({ session, onNavigate, business = BUSINES
 
       {adding && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
+          <div className="flex gap-1 bg-white rounded-xl p-1 w-fit border border-blue-100">
+            {[['create', 'Create Account Now'], ['invite', 'Send Invite Email']].map(([v, label]) => (
+              <button key={v} onClick={() => { setAddMode(v); setInviteMsg(null) }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${addMode === v ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-700'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+
           <div className="grid grid-cols-2 gap-2">
             <input placeholder="Email" className="border border-gray-200 rounded-lg px-3 py-2 text-sm" value={newEmail} onChange={e => setNewEmail(e.target.value)} />
             <input placeholder="Full name (optional)" className="border border-gray-200 rounded-lg px-3 py-2 text-sm" value={newFullName} onChange={e => setNewFullName(e.target.value)} />
           </div>
+
+          {addMode === 'create' && (
+            <div className="flex gap-2">
+              <input placeholder="Password" type={showPassword ? 'text' : 'password'}
+                className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+              <button onClick={() => setShowPassword(s => !s)} className="text-xs font-bold text-gray-500 hover:text-gray-700 px-2 border border-gray-200 rounded-lg">
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+              <button onClick={generatePassword} className="text-xs font-bold text-blue-600 hover:text-blue-800 px-2 border border-blue-200 rounded-lg">
+                Generate
+              </button>
+            </div>
+          )}
+
           {inviteMsg && <div className={`text-xs font-semibold ${inviteMsg.ok ? 'text-green-700' : 'text-red-700'}`}>{inviteMsg.text}</div>}
-          <button onClick={inviteCustomer} disabled={inviting || !newEmail.trim()}
+
+          <button onClick={addCustomer} disabled={inviting || !newEmail.trim() || (addMode === 'create' && !newPassword)}
             className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition disabled:opacity-50">
-            {inviting ? 'Sending…' : 'Send Invite'}
+            {inviting ? 'Working…' : addMode === 'create' ? 'Create Account' : 'Send Invite'}
           </button>
-          <p className="text-xs text-blue-600">Sends a Supabase Auth invite email — the customer sets their own password from that email, and the account appears in the list right away.</p>
+          <p className="text-xs text-blue-600">
+            {addMode === 'create'
+              ? "Creates a fully active account immediately with the password above — you'll need to share it with the customer yourself (it's shown once, never stored)."
+              : "Sends a Supabase Auth invite email — the customer sets their own password from that email, and the account appears in the list right away."}
+          </p>
         </div>
       )}
 
