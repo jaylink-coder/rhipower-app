@@ -329,3 +329,40 @@ export async function getVatReport({ from, to } = {}) {
   const inputVat  = await getAccountBalance('input_vat',  { from, asOfDate: to })
   return { outputVat, inputVat, netPayable: ROUND(outputVat - inputVat) }
 }
+
+// Revenue/profit bucketed by calendar month, for the Reports dashboard's
+// trend charts. One fetch across the whole window rather than calling
+// getProfitAndLoss() once per month, since that would re-query the same
+// journal_entry_lines range N times.
+export async function getMonthlyTrend({ months = 12 } = {}) {
+  const now = new Date()
+  const startMonth = new Date(now.getFullYear(), now.getMonth() - (months - 1), 1)
+  const accounts = await loadAccounts()
+  const accountById = new Map(accounts.map(a => [a.id, a]))
+  const lines = await fetchPostedLines({ from: startMonth.toISOString().slice(0, 10) })
+
+  const buckets = new Map()
+  for (let i = 0; i < months; i++) {
+    const d = new Date(startMonth.getFullYear(), startMonth.getMonth() + i, 1)
+    buckets.set(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, { income: 0, cogs: 0, opex: 0 })
+  }
+
+  lines.forEach(l => {
+    const account = accountById.get(l.account_id)
+    if (!account) return
+    const bucket = buckets.get(l.journal_entries.entry_date.slice(0, 7))
+    if (!bucket) return
+    const amt = account.normal_balance === 'credit'
+      ? Number(l.credit_kes) - Number(l.debit_kes)
+      : Number(l.debit_kes) - Number(l.credit_kes)
+    if (account.account_type === 'income') bucket.income += amt
+    else if (account.account_subtype === 'cogs') bucket.cogs += amt
+    else if (account.account_type === 'expense') bucket.opex += amt
+  })
+
+  return Array.from(buckets.entries()).map(([month, b]) => {
+    const revenue = ROUND(b.income), cogs = ROUND(b.cogs), opex = ROUND(b.opex)
+    const grossProfit = ROUND(revenue - cogs)
+    return { month, revenue, cogs, grossProfit, opex, netProfit: ROUND(grossProfit - opex) }
+  })
+}
