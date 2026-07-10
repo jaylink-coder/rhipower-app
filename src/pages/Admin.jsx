@@ -20,6 +20,7 @@ import AdminAccounting from './AdminAccounting.jsx'
 import AdminVendorBills from './AdminVendorBills.jsx'
 import AdminFixedAssets from './AdminFixedAssets.jsx'
 import AdminInvestorSnapshot from './AdminInvestorSnapshot.jsx'
+import AdminNewOrder from './AdminNewOrder.jsx'
 import { fetchOrgSettings, FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
 
 // KRA VAT categories — 'standard' (taxed at the org's VAT rate), 'zero_rated'
@@ -986,6 +987,7 @@ function InventoryTable({ session, invSection }) {
 // ── Main admin panel — auth gate + tabs ─────────────────────────────────────
 const SECTIONS = [
   { id: 'home',        label: '🏠 Command Centre' },
+  { id: 'neworder',    label: '🛒 New Order (Phone/Walk-in)' },
   { id: 'leads',       label: '📋 Leads & Pipeline' },
   { id: 'inventory',   label: '📦 Inventory & Prices' },
   { id: 'suppliers',   label: '🏭 Suppliers' },
@@ -1105,6 +1107,7 @@ export default function Admin({ onBack }) {
 
         <div className="max-w-7xl px-4 py-6 print:max-w-none print:px-0 print:py-0">
           {activeTab === 'home'        && <AdminHome session={session} onNavigate={navigateTo} />}
+          {activeTab === 'neworder'    && <AdminNewOrder session={session} onNavigate={navigateTo} />}
           {activeTab === 'leads'       && <AdminLeads session={session} onNavigate={navigateTo} focusId={focusId} business={business} />}
           {activeTab === 'inventory'   && <InventoryTable session={session} invSection={invSection} />}
           {activeTab === 'suppliers'   && <AdminSuppliers session={session} />}
