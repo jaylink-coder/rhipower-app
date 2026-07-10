@@ -827,24 +827,22 @@ function InventoryTable({ session, invSection }) {
     logAdminAction(session, 'stock_toggle', key, { in_stock: next })
   }
 
+  // Deliberately narrow: stock_qty/reorder_point/supplier only. Capacity,
+  // weight, VAT status, and spec fields used to also live in this form —
+  // duplicated with the item detail modal's "Edit Details" (added for
+  // sku/description editing), which meant the SAME field could be edited
+  // in two different places with two different pieces of local state, so
+  // one could show stale data relative to the other. There is now exactly
+  // one place to edit each field: quick stock levels here, everything else
+  // (brand/model, description, capacity, weight, VAT, specs) in the modal.
   function startEditStock(key) {
     const r = rows[key] || {}
-    const meta = CATEGORY_META[r.category]
-    const form = {
+    setEditingStock(p => ({ ...p, [key]: {
       stock_qty:     r.stock_qty     != null ? String(r.stock_qty)     : '',
       reorder_point: r.reorder_point != null ? String(r.reorder_point) : '',
       supplier:      r.supplier || '',
-      vat_status:    r.vat_status || 'standard',
       reason:        '',
-    }
-    // Product categories (panel/inverter/battery) also expose capacity,
-    // weight, and comparison specs in this same combined form.
-    if (meta) {
-      form.capacity       = r[meta.capacityField] != null ? String(r[meta.capacityField]) : ''
-      form.unit_weight_kg = r.unit_weight_kg != null ? String(r.unit_weight_kg) : ''
-      ;(SPEC_FIELDS[r.category] || []).forEach(s => { form[s.key] = r[s.key] != null ? String(r[s.key]) : '' })
-    }
-    setEditingStock(p => ({ ...p, [key]: form }))
+    } }))
   }
   function cancelEditStock(key) {
     setEditingStock(p => { const n = { ...p }; delete n[key]; return n })
@@ -855,21 +853,11 @@ function InventoryTable({ session, invSection }) {
   async function saveStock(key) {
     const form = editingStock[key] || {}
     const row  = rows[key] || {}
-    const meta = CATEGORY_META[row.category]
     const payload = {
       stock_qty:     form.stock_qty     === '' ? null : parseInt(form.stock_qty, 10),
       reorder_point: form.reorder_point === '' ? null : parseInt(form.reorder_point, 10),
       supplier:      (form.supplier || '').trim() || null,
-      vat_status:    form.vat_status || 'standard',
       updated_at:    new Date().toISOString(),
-    }
-    if (meta) {
-      if (form.capacity !== undefined)       payload[meta.capacityField] = form.capacity === '' ? null : parseFloat(form.capacity)
-      if (form.unit_weight_kg !== undefined) payload.unit_weight_kg      = form.unit_weight_kg === '' ? null : parseFloat(form.unit_weight_kg)
-      ;(SPEC_FIELDS[row.category] || []).forEach(s => {
-        if (form[s.key] === undefined) return
-        payload[s.key] = form[s.key] === '' ? null : (s.text ? form[s.key] : parseFloat(form[s.key]))
-      })
     }
     setSavingStock(p => ({ ...p, [key]: true }))
     const { error } = await supabase.from('inventory_prices').update(payload).eq('role_key', key)
@@ -1025,32 +1013,9 @@ function InventoryTable({ session, invSection }) {
                                 onChange={e => updateEditingStock(item.key, 'reorder_point', e.target.value)}
                                 className="w-14 border-2 border-blue-400 rounded-lg px-2 py-1 text-xs font-mono outline-none" />
                             </div>
-                            {CATEGORY_META[row.category] && (
-                              <>
-                                <div className="flex gap-1">
-                                  <input type="number" placeholder={CATEGORY_META[row.category].capacityLabel} value={editingStock[item.key].capacity}
-                                    onChange={e => updateEditingStock(item.key, 'capacity', e.target.value)}
-                                    className="w-20 border-2 border-blue-400 rounded-lg px-2 py-1 text-xs font-mono outline-none" />
-                                  <input type="number" placeholder="Weight kg" value={editingStock[item.key].unit_weight_kg}
-                                    onChange={e => updateEditingStock(item.key, 'unit_weight_kg', e.target.value)}
-                                    className="w-20 border-2 border-blue-400 rounded-lg px-2 py-1 text-xs font-mono outline-none" />
-                                </div>
-                                {(SPEC_FIELDS[row.category] || []).map(s => (
-                                  <input key={s.key} type={s.text ? 'text' : 'number'} placeholder={s.label}
-                                    value={editingStock[item.key][s.key] ?? ''}
-                                    onChange={e => updateEditingStock(item.key, s.key, e.target.value)}
-                                    className="border-2 border-blue-400 rounded-lg px-2 py-1 text-xs outline-none" />
-                                ))}
-                              </>
-                            )}
                             <input type="text" placeholder="Supplier name" value={editingStock[item.key].supplier}
                               onChange={e => updateEditingStock(item.key, 'supplier', e.target.value)}
                               className="border-2 border-blue-400 rounded-lg px-2 py-1 text-xs outline-none" />
-                            <select value={editingStock[item.key].vat_status}
-                              onChange={e => updateEditingStock(item.key, 'vat_status', e.target.value)}
-                              className="border-2 border-blue-400 rounded-lg px-2 py-1 text-xs bg-white outline-none">
-                              {VAT_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                            </select>
                             <input type="text" placeholder="Reason for qty change (optional)" value={editingStock[item.key].reason}
                               onChange={e => updateEditingStock(item.key, 'reason', e.target.value)}
                               onKeyDown={e => { if (e.key === 'Enter') saveStock(item.key); if (e.key === 'Escape') cancelEditStock(item.key) }}
@@ -1062,6 +1027,7 @@ function InventoryTable({ session, invSection }) {
                               </button>
                               <button onClick={() => cancelEditStock(item.key)} className="text-xs text-gray-400 hover:text-gray-600 px-1">✕</button>
                             </div>
+                            <div className="text-[10px] text-gray-400 italic">Capacity, weight, VAT & specs: click the item name →</div>
                           </div>
                         ) : (
                           <button onClick={() => startEditStock(item.key)} className="text-left hover:bg-gray-50 rounded-lg px-1 -mx-1 py-0.5 transition">
