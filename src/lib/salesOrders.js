@@ -12,10 +12,11 @@
 // back to the cheapest current option in that tier (the same fallback it
 // already uses when no override is given).
 import { supabase } from './supabase.js'
-import { fetchInventory, toProduct } from './inventory.js'
+import { fetchInventory, toProduct, logStockMovement } from './inventory.js'
 import { runCalculation } from './calculator.js'
 import { DEFAULT_APPLIANCES } from '../data/appliances.js'
 import { logAdminAction } from './auditLog.js'
+import { postJournalEntry, reverseJournalEntry } from './ledger.js'
 
 function buildCostByRoleKey(inventory, overrideByKey) {
   const map = {}
@@ -98,6 +99,109 @@ export async function convertQuoteToSalesOrder(quote, session) {
 
   logAdminAction(session, 'sales_order_created', so.id, { quotation_id: quote.id, total: results.grandTotal })
   return { ...so, sales_order_lines: lineRows || [] }
+}
+
+// Called by BOTH confirmSO() and fastTrack() in AdminSalesOrders.jsx — this
+// is the single place stock actually leaves the sellable pool (see the file
+// header comment: fulfilling a line only records delivery progress, it
+// never touches stock_qty), so it's also the single place COGS gets
+// posted. Keeping both in one function means the ledger and the stock
+// count can never drift out of sync with each other the way two
+// independently-maintained inline loops eventually would.
+//
+// Re-fetches CURRENT stock_qty/weighted_avg_cost_kes/buying_price_kes fresh
+// from inventory_prices for the involved role_keys rather than trusting the
+// caller's possibly-stale UI state — this is a financial posting, so it
+// reads its own numbers.
+//
+// Tradeoff, deliberately accepted rather than engineered around: COGS
+// posts at CONFIRM time, which is when stock actually decreases — not at
+// invoice/fulfillment time. On an order that sits "confirmed" for a while
+// before being invoiced, this means COGS can land in the GL slightly ahead
+// of its matching revenue. Given this app's "Fast-track" button (confirm +
+// fulfill + invoice as one click for the common case), that gap is usually
+// zero. A stricter design would route confirm-time deductions through a
+// "Reserved Inventory" holding account and reclassify to COGS only at
+// invoice time — not built here, to avoid over-engineering a single-admin
+// SME's books for a gap that rarely occurs in practice.
+export async function reserveSalesOrderStock(so, deductingLines, session) {
+  if (deductingLines.length === 0) return { stockUpdates: {} }
+
+  const roleKeys = deductingLines.map(l => l.role_key)
+  const { data: freshItems } = await supabase.from('inventory_prices')
+    .select('role_key, stock_qty, weighted_avg_cost_kes, buying_price_kes').in('role_key', roleKeys)
+  const itemByKey = {}
+  ;(freshItems || []).forEach(r => { itemByKey[r.role_key] = r })
+
+  const soLabel = `SO-${String(so.so_number).padStart(4, '0')}`
+  const stockUpdates = {}
+  let totalCost = 0
+  for (const line of deductingLines) {
+    const item = itemByKey[line.role_key]
+    if (!item || item.stock_qty == null) continue  // not tracked — nothing to reserve
+    const newStock = item.stock_qty - line.qty
+    await supabase.from('inventory_prices').update({ stock_qty: newStock, updated_at: new Date().toISOString() }).eq('role_key', line.role_key)
+    await logStockMovement({
+      roleKey: line.role_key, quantityChanged: -line.qty, session,
+      movementType: 'reservation', sourceType: 'sales_order', sourceId: so.id,
+      reason: `Reserved for ${soLabel}`,
+    })
+    stockUpdates[line.role_key] = newStock
+    totalCost += (item.weighted_avg_cost_kes ?? item.buying_price_kes ?? 0) * line.qty
+  }
+
+  if (totalCost > 0) {
+    await postJournalEntry({
+      entryDate: new Date().toISOString().slice(0, 10),
+      memo: `Cost of goods sold — ${soLabel} confirmed`,
+      sourceType: 'sales_order_confirm', sourceId: so.id,
+      lines: [
+        { accountKey: 'cogs',             debit:  totalCost },
+        { accountKey: 'inventory_asset',  credit: totalCost },
+      ],
+    }, session)
+  }
+
+  return { stockUpdates }
+}
+
+// Called by cancelSO(), only ever while status='confirmed' with zero lines
+// fulfilled — always a full, clean undo of exactly what
+// reserveSalesOrderStock() just did. That's why this reverses the EXACT
+// original journal entry (reverseJournalEntry) rather than recomputing
+// current costs — a partial/re-derived undo would be wrong here in a way
+// it wouldn't be for a fresh posting.
+export async function reverseSalesOrderStock(so, deductingLines, session) {
+  if (deductingLines.length === 0) return { stockUpdates: {} }
+
+  const roleKeys = deductingLines.map(l => l.role_key)
+  const { data: freshItems } = await supabase.from('inventory_prices')
+    .select('role_key, stock_qty').in('role_key', roleKeys)
+  const itemByKey = {}
+  ;(freshItems || []).forEach(r => { itemByKey[r.role_key] = r })
+
+  const soLabel = `SO-${String(so.so_number).padStart(4, '0')}`
+  const stockUpdates = {}
+  for (const line of deductingLines) {
+    const item = itemByKey[line.role_key]
+    if (!item || item.stock_qty == null) continue
+    const newStock = item.stock_qty + line.qty
+    await supabase.from('inventory_prices').update({ stock_qty: newStock, updated_at: new Date().toISOString() }).eq('role_key', line.role_key)
+    await logStockMovement({
+      roleKey: line.role_key, quantityChanged: line.qty, session,
+      movementType: 'reservation_release', sourceType: 'sales_order', sourceId: so.id,
+      reason: `Cancelled ${soLabel}`,
+    })
+    stockUpdates[line.role_key] = newStock
+  }
+
+  const { data: originalEntry } = await supabase.from('journal_entries')
+    .select('id').eq('source_type', 'sales_order_confirm').eq('source_id', so.id).eq('status', 'posted').maybeSingle()
+  if (originalEntry) {
+    await reverseJournalEntry(originalEntry.id, { memo: `Cancelled ${soLabel} — stock reservation released` }, session)
+  }
+
+  return { stockUpdates }
 }
 
 // Called whenever a Sales Order reaches 'fulfilled' (per-line fulfillment or

@@ -9,9 +9,8 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { formatKsh } from '../lib/calculator.js'
 import { logAdminAction } from '../lib/auditLog.js'
-import { logStockMovement } from '../lib/inventory.js'
 import { generateInvoiceFromSalesOrder } from '../lib/invoices.js'
-import { syncLeadStatusToInstalled } from '../lib/salesOrders.js'
+import { syncLeadStatusToInstalled, reserveSalesOrderStock, reverseSalesOrderStock } from '../lib/salesOrders.js'
 import { formatDocNumber } from '../lib/docNumbers.js'
 import { FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
 
@@ -131,19 +130,7 @@ export default function AdminSalesOrders({ session, onNavigate, focusId, busines
       }
     }
     setBusyConfirm(p => ({ ...p, [so.id]: true }))
-    const stockUpdates = {}
-    for (const line of deductingLines) {
-      const item = items[line.role_key]
-      if (!item || item.stock_qty == null) continue  // not tracked — nothing to reserve
-      const newStock = item.stock_qty - line.qty
-      await supabase.from('inventory_prices').update({ stock_qty: newStock, updated_at: new Date().toISOString() }).eq('role_key', line.role_key)
-      await logStockMovement({
-        roleKey: line.role_key, quantityChanged: -line.qty, session,
-        movementType: 'reservation', sourceType: 'sales_order', sourceId: so.id,
-        reason: `Reserved for ${soNumber(so)}`,
-      })
-      stockUpdates[line.role_key] = newStock
-    }
+    const { stockUpdates } = await reserveSalesOrderStock(so, deductingLines, session)
     await supabase.from('sales_orders').update({ status: 'confirmed', updated_at: new Date().toISOString() }).eq('id', so.id)
     logAdminAction(session, 'sales_order_confirmed', so.id, { quotation_id: so.quotation_id })
     setItems(p => { const n = { ...p }; Object.entries(stockUpdates).forEach(([k, v]) => { n[k] = { ...n[k], stock_qty: v } }); return n })
@@ -156,18 +143,8 @@ export default function AdminSalesOrders({ session, onNavigate, focusId, busines
     setBusyCancel(p => ({ ...p, [so.id]: true }))
     if (so.status === 'confirmed') {
       const deductingLines = (so.sales_order_lines || []).filter(l => l.is_stock_deducting && l.role_key)
-      for (const line of deductingLines) {
-        const item = items[line.role_key]
-        if (!item || item.stock_qty == null) continue
-        const newStock = item.stock_qty + line.qty
-        await supabase.from('inventory_prices').update({ stock_qty: newStock, updated_at: new Date().toISOString() }).eq('role_key', line.role_key)
-        await logStockMovement({
-          roleKey: line.role_key, quantityChanged: line.qty, session,
-          movementType: 'reservation_release', sourceType: 'sales_order', sourceId: so.id,
-          reason: `Cancelled ${soNumber(so)}`,
-        })
-        setItems(p => ({ ...p, [line.role_key]: { ...p[line.role_key], stock_qty: newStock } }))
-      }
+      const { stockUpdates } = await reverseSalesOrderStock(so, deductingLines, session)
+      setItems(p => { const n = { ...p }; Object.entries(stockUpdates).forEach(([k, v]) => { n[k] = { ...n[k], stock_qty: v } }); return n })
     }
     await supabase.from('sales_orders').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', so.id)
     logAdminAction(session, 'sales_order_cancelled', so.id, {})
@@ -210,17 +187,7 @@ export default function AdminSalesOrders({ session, onNavigate, focusId, busines
     setFastTrackError(p => { const n = { ...p }; delete n[so.id]; return n })
     try {
       if (so.status === 'draft') {
-        for (const line of deductingLines) {
-          const item = items[line.role_key]
-          if (!item || item.stock_qty == null) continue
-          const newStock = item.stock_qty - line.qty
-          await supabase.from('inventory_prices').update({ stock_qty: newStock, updated_at: new Date().toISOString() }).eq('role_key', line.role_key)
-          await logStockMovement({
-            roleKey: line.role_key, quantityChanged: -line.qty, session,
-            movementType: 'reservation', sourceType: 'sales_order', sourceId: so.id,
-            reason: `Reserved for ${soNumber(so)} (fast-track)`,
-          })
-        }
+        await reserveSalesOrderStock(so, deductingLines, session)
         await supabase.from('sales_orders').update({ status: 'confirmed', updated_at: new Date().toISOString() }).eq('id', so.id)
         logAdminAction(session, 'sales_order_confirmed', so.id, { quotation_id: so.quotation_id, fastTrack: true })
       }

@@ -8,12 +8,13 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { formatKsh } from '../lib/calculator.js'
+import { getAccountBalance } from '../lib/ledger.js'
 
 const SECTIONS = [
   { id: 'valuation', label: '📦 Stock Valuation' },
   { id: 'margin',    label: '💹 Gross Margin' },
   { id: 'products',  label: '🏆 Sales by Product' },
-  { id: 'balances',  label: '👤 Customer Balances' },
+  { id: 'balances',  label: '👤 AR Aging' },
 ]
 const CATEGORY_LABELS = { panel: '☀️ Panels', inverter: '⚡ Inverters', battery: '🔋 Batteries', protection: '🛡️ Protection', cable: '🔌 Cable', mounting: '🔧 Mounting', safety: '⚠️ Safety' }
 
@@ -26,7 +27,7 @@ function StatCard({ label, value, color }) {
   )
 }
 
-function StockValuationTab({ items }) {
+function StockValuationTab({ items, glInventoryBalance }) {
   const active = items.filter(i => i.is_active !== false && i.stock_qty != null)
   const rows = active.map(i => {
     const cost = i.weighted_avg_cost_kes ?? i.buying_price_kes
@@ -35,6 +36,7 @@ function StockValuationTab({ items }) {
   const totalValue = rows.reduce((s, r) => s + r.value, 0)
   const byCategory = {}
   rows.forEach(r => { byCategory[r.category] = (byCategory[r.category] || 0) + r.value })
+  const mismatch = glInventoryBalance != null && Math.round(totalValue) !== Math.round(glInventoryBalance)
 
   return (
     <div className="space-y-4">
@@ -47,6 +49,13 @@ function StockValuationTab({ items }) {
         Cost = weighted-average purchase cost from received Purchase Orders. Items marked <span className="text-amber-600 font-semibold">est.</span> have
         never been received against a PO — their current buying price is used as a placeholder instead.
       </p>
+      {glInventoryBalance != null && (
+        <div className={`text-xs rounded-xl p-3 border ${mismatch ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-green-50 border-green-200 text-green-800'}`}>
+          {mismatch
+            ? `⚠️ This report's total (${formatKsh(totalValue)}) doesn't match the General Ledger's Inventory Asset balance (${formatKsh(glInventoryBalance)}) — these are computed via two independent code paths (this report from live stock levels, the GL from posted journal entries), so a mismatch is a real signal — most likely the Opening Balances wizard hasn't been run yet, or something bypassed the posting engine. Check Accounting → Journal.`
+            : `✓ Matches the General Ledger's Inventory Asset balance (${formatKsh(glInventoryBalance)}).`}
+        </div>
+      )}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <table className="w-full text-sm">
           <thead>
@@ -178,52 +187,89 @@ function SalesByProductTab({ salesOrders }) {
   )
 }
 
-function CustomerBalancesTab({ invoices }) {
+// 0-30/31-60/61-90/90+ day buckets from due_date, plus a "Current" bucket
+// for balances not yet due — the standard AR aging shape, superseding the
+// old flat "Customer Balances" report (same data source, strictly more
+// information, so it replaces rather than duplicates).
+function agingBucket(dueDate) {
+  if (!dueDate) return 'current'
+  const days = Math.floor((Date.now() - new Date(dueDate).getTime()) / 86400000)
+  if (days <= 0) return 'current'
+  if (days <= 30) return 'b1'
+  if (days <= 60) return 'b2'
+  if (days <= 90) return 'b3'
+  return 'b4'
+}
+const AGING_BUCKETS = ['current', 'b1', 'b2', 'b3', 'b4']
+const AGING_LABELS  = { current: 'Current', b1: '1–30 days', b2: '31–60 days', b3: '61–90 days', b4: '90+ days' }
+
+function CustomerBalancesTab({ invoices, glArBalance }) {
   const byPhone = {}
-  invoices.filter(i => i.status !== 'void').forEach(inv => {
+  invoices.filter(i => i.status !== 'void' && Number(i.balance_due_kes) > 0).forEach(inv => {
     const key = inv.client_phone || inv.client_name
-    const r = byPhone[key] = byPhone[key] || { name: inv.client_name, phone: inv.client_phone, total: 0, paid: 0, balance: 0, count: 0 }
-    r.total   += Number(inv.total_kes || 0)
-    r.paid    += Number(inv.amount_paid_kes || 0)
-    r.balance += Number(inv.balance_due_kes || 0)
-    r.count   += 1
+    const r = byPhone[key] = byPhone[key] || { name: inv.client_name, phone: inv.client_phone, buckets: { current: 0, b1: 0, b2: 0, b3: 0, b4: 0 }, total: 0, count: 0 }
+    r.buckets[agingBucket(inv.due_date)] += Number(inv.balance_due_kes || 0)
+    r.total += Number(inv.balance_due_kes || 0)
+    r.count += 1
   })
-  const rows = Object.values(byPhone).sort((a, b) => b.balance - a.balance)
-  const totalOutstanding = rows.reduce((s, r) => s + r.balance, 0)
+  const rows = Object.values(byPhone).sort((a, b) => b.total - a.total)
+  const totalOutstanding = rows.reduce((s, r) => s + r.total, 0)
+  const totals = { current: 0, b1: 0, b2: 0, b3: 0, b4: 0 }
+  rows.forEach(r => AGING_BUCKETS.forEach(k => { totals[k] += r.buckets[k] }))
+  const mismatch = glArBalance != null && Math.round(totalOutstanding) !== Math.round(glArBalance)
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <StatCard label="Total Outstanding" value={formatKsh(totalOutstanding)} color="bg-red-50 text-red-700" />
-        <StatCard label="Customers Invoiced" value={rows.length} color="bg-blue-50 text-blue-800" />
+        <StatCard label="Customers with Balance" value={rows.length} color="bg-blue-50 text-blue-800" />
+        {glArBalance != null && (
+          <StatCard label="GL Accounts Receivable" value={formatKsh(glArBalance)} color={mismatch ? 'bg-amber-50 text-amber-800' : 'bg-green-50 text-green-800'} />
+        )}
       </div>
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      {mismatch && (
+        <div className="text-xs rounded-xl p-3 border bg-amber-50 border-amber-200 text-amber-800">
+          ⚠️ This report's total ({formatKsh(totalOutstanding)}) doesn't match the General Ledger's Accounts Receivable balance ({formatKsh(glArBalance)}) —
+          most likely some invoices predate the accounting module (Phase 2) or the Opening Balances wizard hasn't been run yet. Both numbers come from
+          independent code paths, so a mismatch is a real signal worth checking in Accounting → Journal.
+        </div>
+      )}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-100 text-xs text-gray-400 uppercase">
               <th className="px-5 py-2 text-left font-bold">Customer</th>
-              <th className="px-4 py-2 text-right font-bold">Invoices</th>
-              <th className="px-4 py-2 text-right font-bold">Total Invoiced</th>
-              <th className="px-4 py-2 text-right font-bold">Paid</th>
-              <th className="px-4 py-2 text-right font-bold">Balance Due</th>
+              {AGING_BUCKETS.map(b => <th key={b} className="px-4 py-2 text-right font-bold whitespace-nowrap">{AGING_LABELS[b]}</th>)}
+              <th className="px-4 py-2 text-right font-bold">Total</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
             {rows.length === 0 ? (
-              <tr><td colSpan={5} className="text-center py-10 text-gray-400">No invoices yet.</td></tr>
+              <tr><td colSpan={AGING_BUCKETS.length + 2} className="text-center py-10 text-gray-400">No outstanding balances.</td></tr>
             ) : rows.map(r => (
               <tr key={r.phone} className="hover:bg-gray-50 transition">
                 <td className="px-5 py-2.5">
                   <div className="font-semibold text-gray-800">{r.name}</div>
                   <div className="text-xs text-gray-400">{r.phone}</div>
                 </td>
-                <td className="px-4 py-2.5 text-right font-mono">{r.count}</td>
-                <td className="px-4 py-2.5 text-right font-mono">{formatKsh(r.total)}</td>
-                <td className="px-4 py-2.5 text-right font-mono text-green-700">{formatKsh(r.paid)}</td>
-                <td className={`px-4 py-2.5 text-right font-mono font-bold ${r.balance > 0 ? 'text-red-700' : 'text-gray-400'}`}>{formatKsh(r.balance)}</td>
+                {AGING_BUCKETS.map(b => (
+                  <td key={b} className={`px-4 py-2.5 text-right font-mono ${b === 'b3' ? 'text-amber-700' : b === 'b4' ? 'font-bold text-red-700' : ''}`}>
+                    {r.buckets[b] > 0 ? formatKsh(r.buckets[b]) : '—'}
+                  </td>
+                ))}
+                <td className="px-4 py-2.5 text-right font-mono font-bold">{formatKsh(r.total)}</td>
               </tr>
             ))}
           </tbody>
+          {rows.length > 0 && (
+            <tfoot>
+              <tr className="border-t-2 border-gray-800 font-black text-sm">
+                <td className="px-5 py-2.5">Total</td>
+                {AGING_BUCKETS.map(b => <td key={b} className="px-4 py-2.5 text-right font-mono">{formatKsh(totals[b])}</td>)}
+                <td className="px-4 py-2.5 text-right font-mono">{formatKsh(totalOutstanding)}</td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
     </div>
@@ -234,6 +280,8 @@ export default function AdminReports() {
   const [items,       setItems]       = useState([])
   const [salesOrders,  setSalesOrders] = useState([])
   const [invoices,     setInvoices]    = useState([])
+  const [glInventoryBalance, setGlInventoryBalance] = useState(null)
+  const [glArBalance,        setGlArBalance]        = useState(null)
   const [loading,      setLoading]     = useState(true)
   const [activeSection, setActiveSection] = useState('valuation')
 
@@ -241,11 +289,21 @@ export default function AdminReports() {
     Promise.all([
       supabase.from('inventory_prices').select('role_key, description, category, stock_qty, weighted_avg_cost_kes, buying_price_kes, is_active'),
       supabase.from('sales_orders').select('*, sales_order_lines(*)'),
-      supabase.from('invoices').select('client_name, client_phone, total_kes, amount_paid_kes, balance_due_kes, status'),
-    ]).then(([itemsRes, soRes, invRes]) => {
+      supabase.from('invoices').select('client_name, client_phone, due_date, total_kes, amount_paid_kes, balance_due_kes, status'),
+      // Cross-checks against the GL — computed via a completely independent
+      // code path (posted journal entries) from the reports above (live
+      // operational tables), so a mismatch is a real, actionable signal.
+      // Caught and ignored if the accounting module's tables don't exist
+      // yet or a required system account is missing, so these reports keep
+      // working exactly as before migrations 021+ are run.
+      getAccountBalance('inventory_asset').catch(() => null),
+      getAccountBalance('accounts_receivable').catch(() => null),
+    ]).then(([itemsRes, soRes, invRes, invBalance, arBalance]) => {
       setItems(itemsRes.data || [])
       setSalesOrders(soRes.data || [])
       setInvoices(invRes.data || [])
+      setGlInventoryBalance(invBalance)
+      setGlArBalance(arBalance)
       setLoading(false)
     })
   }, [])
@@ -263,10 +321,10 @@ export default function AdminReports() {
         ))}
       </div>
 
-      {activeSection === 'valuation' && <StockValuationTab items={items} />}
+      {activeSection === 'valuation' && <StockValuationTab items={items} glInventoryBalance={glInventoryBalance} />}
       {activeSection === 'margin'    && <GrossMarginTab salesOrders={salesOrders} />}
       {activeSection === 'products'  && <SalesByProductTab salesOrders={salesOrders} />}
-      {activeSection === 'balances'  && <CustomerBalancesTab invoices={invoices} />}
+      {activeSection === 'balances'  && <CustomerBalancesTab invoices={invoices} glArBalance={glArBalance} />}
     </div>
   )
 }

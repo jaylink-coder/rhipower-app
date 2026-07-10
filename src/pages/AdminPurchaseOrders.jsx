@@ -12,6 +12,7 @@ import { logAdminAction } from '../lib/auditLog.js'
 import { logStockMovement } from '../lib/inventory.js'
 import { formatDocNumber } from '../lib/docNumbers.js'
 import { FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
+import { receivePOLineToBill } from '../lib/vendorBills.js'
 
 const STATUS_OPTIONS = [
   { value: 'draft',               label: 'Draft',               color: 'bg-gray-100  text-gray-600'  },
@@ -109,12 +110,14 @@ function ReceiveLineRow({ po, line, item, session, business, onReceived }) {
   const remaining = line.qty_ordered - line.qty_received
   const [qty, setQty] = useState(String(remaining))
   const [busy, setBusy] = useState(false)
+  const [billError, setBillError] = useState('')
   const canReceive = ['ordered', 'partially_received'].includes(po.status) && remaining > 0
 
   async function receive() {
     const n = parseInt(qty, 10)
     if (!n || n <= 0 || n > remaining) return
     setBusy(true)
+    setBillError('')
     const newQtyReceived = line.qty_received + n
     const { error } = await supabase.from('purchase_order_lines')
       .update({ qty_received: newQtyReceived }).eq('id', line.id)
@@ -137,29 +140,40 @@ function ReceiveLineRow({ po, line, item, session, business, onReceived }) {
         reason: `Received against ${formatDocNumber(business.poPrefix, po.po_number)}`,
       })
       logAdminAction(session, 'po_line_received', po.id, { role_key: line.role_key, qty: n })
+      // Stock has already physically moved by this point — a failure here
+      // means the vendor bill/ledger posting needs a manual follow-up in
+      // Vendor Bills, not that the receipt itself should be rolled back.
+      try {
+        await receivePOLineToBill(po, line, item, n, session)
+      } catch (billErr) {
+        setBillError(billErr.message || 'Stock received, but the vendor bill/ledger posting failed — check Vendor Bills manually.')
+      }
       onReceived({ lineId: line.id, qtyReceived: newQtyReceived, roleKey: line.role_key, newStock, newAvg })
     }
     setBusy(false)
   }
 
   return (
-    <div className="flex items-center justify-between gap-2 text-sm py-1.5">
-      <div className="flex-1 min-w-0">
-        <div className="font-semibold text-gray-700 truncate">{item?.description || line.role_key}</div>
-        <div className="text-xs text-gray-400">Ordered {line.qty_ordered} · Received {line.qty_received} · {formatKsh(line.unit_cost_kes)}/unit</div>
-      </div>
-      {canReceive ? (
-        <div className="flex items-center gap-1 shrink-0">
-          <input type="number" value={qty} onChange={e => setQty(e.target.value)}
-            className="w-16 border-2 border-blue-400 rounded-lg px-2 py-1 text-xs font-mono outline-none" />
-          <button onClick={receive} disabled={busy}
-            className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold px-2 py-1 rounded-lg transition disabled:opacity-50">
-            {busy ? '…' : 'Receive'}
-          </button>
+    <div className="py-1.5">
+      <div className="flex items-center justify-between gap-2 text-sm">
+        <div className="flex-1 min-w-0">
+          <div className="font-semibold text-gray-700 truncate">{item?.description || line.role_key}</div>
+          <div className="text-xs text-gray-400">Ordered {line.qty_ordered} · Received {line.qty_received} · {formatKsh(line.unit_cost_kes)}/unit</div>
         </div>
-      ) : (
-        <span className="text-xs text-gray-400 shrink-0">{remaining === 0 ? '✓ Fully received' : '—'}</span>
-      )}
+        {canReceive ? (
+          <div className="flex items-center gap-1 shrink-0">
+            <input type="number" value={qty} onChange={e => setQty(e.target.value)}
+              className="w-16 border-2 border-blue-400 rounded-lg px-2 py-1 text-xs font-mono outline-none" />
+            <button onClick={receive} disabled={busy}
+              className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold px-2 py-1 rounded-lg transition disabled:opacity-50">
+              {busy ? '…' : 'Receive'}
+            </button>
+          </div>
+        ) : (
+          <span className="text-xs text-gray-400 shrink-0">{remaining === 0 ? '✓ Fully received' : '—'}</span>
+        )}
+      </div>
+      {billError && <div className="text-xs text-red-600 mt-1">{billError}</div>}
     </div>
   )
 }
@@ -181,7 +195,7 @@ export default function AdminPurchaseOrders({ session, business = BUSINESS_FALLB
     const [{ data: poRows }, { data: supplierRows }, { data: itemRows }] = await Promise.all([
       supabase.from('purchase_orders').select('*, purchase_order_lines(*)').order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').order('name'),
-      supabase.from('inventory_prices').select('role_key, item_code, description, buying_price_kes, stock_qty, is_active, weighted_avg_cost_kes'),
+      supabase.from('inventory_prices').select('role_key, item_code, description, buying_price_kes, stock_qty, is_active, weighted_avg_cost_kes, vat_status'),
     ])
     setPos(poRows || [])
     setSuppliers(supplierRows || [])

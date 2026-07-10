@@ -16,6 +16,9 @@ import AdminSalesOrders from './AdminSalesOrders.jsx'
 import AdminInvoices from './AdminInvoices.jsx'
 import AdminSettings from './AdminSettings.jsx'
 import AdminReports from './AdminReports.jsx'
+import AdminAccounting from './AdminAccounting.jsx'
+import AdminVendorBills from './AdminVendorBills.jsx'
+import AdminFixedAssets from './AdminFixedAssets.jsx'
 import { fetchOrgSettings, FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
 
 // KRA VAT categories — 'standard' (taxed at the org's VAT rate), 'zero_rated'
@@ -986,9 +989,12 @@ const SECTIONS = [
   { id: 'inventory',   label: '📦 Inventory & Prices' },
   { id: 'suppliers',   label: '🏭 Suppliers' },
   { id: 'purchasing',  label: '🧾 Purchase Orders' },
+  { id: 'vendorbills', label: '💳 Vendor Bills' },
   { id: 'salesorders', label: '📑 Sales Orders' },
   { id: 'invoices',    label: '💵 Invoices' },
   { id: 'customers',   label: '👥 Customers' },
+  { id: 'accounting',  label: '📚 Accounting' },
+  { id: 'fixedassets', label: '🏗️ Fixed Assets' },
   { id: 'reports',     label: '📊 Reports' },
   { id: 'settings',    label: '⚙️ Settings' },
 ]
@@ -1101,9 +1107,12 @@ export default function Admin({ onBack }) {
           {activeTab === 'inventory'   && <InventoryTable session={session} invSection={invSection} />}
           {activeTab === 'suppliers'   && <AdminSuppliers session={session} />}
           {activeTab === 'purchasing'  && <AdminPurchaseOrders session={session} business={business} />}
+          {activeTab === 'vendorbills' && <AdminVendorBills session={session} />}
           {activeTab === 'salesorders' && <AdminSalesOrders session={session} onNavigate={navigateTo} focusId={focusId} business={business} />}
           {activeTab === 'invoices'    && <AdminInvoices session={session} onNavigate={navigateTo} focusId={focusId} business={business} />}
           {activeTab === 'customers'   && <AdminCustomers session={session} onNavigate={navigateTo} business={business} />}
+          {activeTab === 'accounting'  && <AdminAccounting session={session} />}
+          {activeTab === 'fixedassets' && <AdminFixedAssets session={session} />}
           {activeTab === 'reports'     && <AdminReports session={session} />}
           {activeTab === 'settings'    && <AdminSettings session={session} onSettingsChanged={setBusiness} />}
         </div>

@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { fetchOrgSettings, updateOrgSettings } from '../lib/orgSettings.js'
 import { logAdminAction } from '../lib/auditLog.js'
+import { downloadCSV } from '../lib/csvExport.js'
 
 const SECTIONS = [
   { id: 'org',      label: '🏢 Organization & Branding' },
@@ -285,17 +286,6 @@ const EXPORT_TABLES = [
   { table: 'customer_profiles',  label: 'Customers' },
 ]
 
-function toCSV(rows) {
-  if (!rows.length) return ''
-  const headers = Object.keys(rows[0])
-  const escape = v => {
-    if (v == null) return ''
-    const s = typeof v === 'object' ? JSON.stringify(v) : String(v)
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-  }
-  return [headers.join(','), ...rows.map(r => headers.map(h => escape(r[h])).join(','))].join('\n')
-}
-
 function DataManagementSection() {
   const [exporting, setExporting] = useState({})
 
@@ -303,14 +293,9 @@ function DataManagementSection() {
     setExporting(p => ({ ...p, [table]: true }))
     const { data } = await supabase.from(table).select('*')
     setExporting(p => ({ ...p, [table]: false }))
-    if (!data?.length) { alert(`No rows in ${label} to export.`); return }
-    const blob = new Blob([toCSV(data)], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `rhipower-${table}-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    if (!downloadCSV(data, `rhipower-${table}-${new Date().toISOString().slice(0, 10)}.csv`)) {
+      alert(`No rows in ${label} to export.`)
+    }
   }
 
   return (

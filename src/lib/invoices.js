@@ -34,6 +34,8 @@ import { supabase } from './supabase.js'
 import { logAdminAction } from './auditLog.js'
 import { recordPayment } from './payments.js'
 import { fetchOrgSettings } from './orgSettings.js'
+import { postJournalEntry } from './ledger.js'
+import { formatDocNumber } from './docNumbers.js'
 
 const ZONE_DESCRIPTIONS = {
   zoneA: 'Solar Array & Combiner (Zone A)',
@@ -72,11 +74,12 @@ export async function generateInvoiceFromSalesOrder(so, session) {
   const sellGroups = [
     ...zoneGroups.map(g => ({
       vatStatus: g.vatStatus,
+      category: 'materials',
       desc: ZONE_DESCRIPTIONS[g.zone] + (zonesOfSameKind(g.zone) > 1 && VAT_STATUS_LABELS[g.vatStatus] ? ` — ${VAT_STATUS_LABELS[g.vatStatus]}` : ''),
       sell: totalBuying > 0 ? materials * (g.buyingCost / totalBuying) : materials / (zoneGroups.length || 1),
     })),
-    { vatStatus: 'standard', desc: 'Installation Labour',        sell: Number(so.labor_kes || 0) },
-    { vatStatus: 'standard', desc: 'Logistics & Site Transport', sell: Number(so.logistics_kes || 0) },
+    { vatStatus: 'standard', category: 'labour',    desc: 'Installation Labour',        sell: Number(so.labor_kes || 0) },
+    { vatStatus: 'standard', category: 'logistics', desc: 'Logistics & Site Transport', sell: Number(so.logistics_kes || 0) },
   ]
 
   const rate = settings.vatRatePct / 100
@@ -96,7 +99,7 @@ export async function generateInvoiceFromSalesOrder(so, session) {
     vatAmt = Math.round(vatAmt)
     allocatedSubtotal += pretax
     allocatedVat      += vatAmt
-    return { description: g.desc, qty: 1, unit_price_kes: pretax, vat_status: g.vatStatus, vat_amount_kes: vatAmt, sort_order: i }
+    return { description: g.desc, qty: 1, unit_price_kes: pretax, vat_status: g.vatStatus, vat_amount_kes: vatAmt, sort_order: i, revenue_category: g.category }
   })
 
   const subtotal = allocatedSubtotal
@@ -125,6 +128,25 @@ export async function generateInvoiceFromSalesOrder(so, session) {
   const { data: lineRows, error: lineErr } = await supabase.from('invoice_lines')
     .insert(invoiceLines.map(l => ({ invoice_id: invoice.id, ...l }))).select().order('sort_order')
   if (lineErr) throw lineErr
+
+  // Revenue recognition — Dr Accounts Receivable for the full total, Cr each
+  // Sales Revenue sub-account for its pretax share, Cr Output VAT Payable
+  // for the tax collected. Posted before the deposit auto-credit below so
+  // the two journal entries land in the correct chronological order
+  // (revenue recognized, then cash received against it).
+  const sumWhere = category => invoiceLines.filter(l => l.revenue_category === category).reduce((s, l) => s + l.unit_price_kes, 0)
+  await postJournalEntry({
+    entryDate: invoice.issue_date,
+    memo: `Invoice ${formatDocNumber(settings.invoicePrefix, invoice.invoice_number, { year: new Date(invoice.issue_date).getFullYear() })} issued to ${invoice.client_name}`,
+    sourceType: 'invoice', sourceId: invoice.id,
+    lines: [
+      { accountKey: 'accounts_receivable',       debit:  total },
+      { accountKey: 'sales_revenue_materials',   credit: sumWhere('materials') },
+      { accountKey: 'sales_revenue_labour',      credit: sumWhere('labour') },
+      { accountKey: 'sales_revenue_logistics',   credit: sumWhere('logistics') },
+      { accountKey: 'output_vat',                credit: vat },
+    ],
+  }, session)
 
   logAdminAction(session, 'invoice_generated', invoice.id, { sales_order_id: so.id, total, vat_pricing_mode: mode })
 
