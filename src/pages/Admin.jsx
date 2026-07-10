@@ -246,11 +246,38 @@ function AddItemForm({ category, onAdded, session, cloneFrom }) {
     return f
   }
   const [form,   setForm]   = useState(blank())
+  const [errors, setErrors] = useState({})
+  const [submitError, setSubmitError] = useState('')
   const [saving, setSaving] = useState(false)
 
+  // Inline, on-blur validation — errors show immediately next to the field
+  // that caused them rather than only surfacing (or worse, silently doing
+  // nothing) when Add Product is clicked.
+  function validateField(key, value) {
+    if (key === 'sku' && !value.trim()) return 'Brand/model is required.'
+    if (key === 'description' && !value.trim()) return 'Description is required.'
+    if (key === 'buying_price_kes') {
+      if (!value) return 'Buying price is required.'
+      if (parseFloat(value) <= 0) return 'Buying price must be greater than zero.'
+    }
+    return null
+  }
+  function handleBlur(key) {
+    const msg = validateField(key, form[key])
+    setErrors(e => ({ ...e, [key]: msg }))
+  }
+  function updateField(key, value) {
+    setForm(f => ({ ...f, [key]: value }))
+    if (errors[key]) setErrors(e => ({ ...e, [key]: null }))
+  }
+
   async function save() {
-    if (!form.sku.trim() || !form.description.trim() || !form.buying_price_kes) return
-    setSaving(true)
+    const required = ['sku', 'description', 'buying_price_kes']
+    const nextErrors = {}
+    required.forEach(key => { const msg = validateField(key, form[key]); if (msg) nextErrors[key] = msg })
+    if (Object.keys(nextErrors).length > 0) { setErrors(nextErrors); return }
+
+    setSaving(true); setSubmitError('')
     const roleKey = `${category}_${form.sku.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${Date.now().toString(36)}`
     const payload = {
       role_key: roleKey, sku: form.sku.trim(), description: form.description.trim(),
@@ -264,49 +291,61 @@ function AddItemForm({ category, onAdded, session, cloneFrom }) {
 
     const { data, error } = await supabase.from('inventory_prices').insert(payload).select().single()
     setSaving(false)
-    if (!error && data) {
-      onAdded(data)
-      setForm(blank())
-      logAdminAction(session, 'product_added', roleKey, { category, sku: data.sku })
-    }
+    if (error) { setSubmitError(error.message); return }
+    onAdded(data)
+    setForm(blank())
+    setErrors({})
+    logAdminAction(session, 'product_added', roleKey, { category, sku: data.sku })
   }
+
+  const fieldClass = key => `border rounded-lg px-2 py-1.5 text-sm outline-none ${errors[key] ? 'border-red-400 focus:border-red-500' : 'border-gray-200 focus:border-blue-400'}`
 
   return (
     <div className="p-4 bg-blue-50 border-b border-blue-100 space-y-2">
       <div className="grid grid-cols-2 gap-2">
-        <input placeholder="Brand / model (e.g. JA Solar 700W N-Type)" value={form.sku}
-          onChange={e => setForm(f => ({ ...f, sku: e.target.value }))}
-          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
-        <input placeholder="Buying price (Ksh)" type="number" value={form.buying_price_kes}
-          onChange={e => setForm(f => ({ ...f, buying_price_kes: e.target.value }))}
-          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
+        <div>
+          <input placeholder="Brand / model (e.g. JA Solar 700W N-Type) *" value={form.sku}
+            onChange={e => updateField('sku', e.target.value)} onBlur={() => handleBlur('sku')}
+            className={`w-full ${fieldClass('sku')}`} />
+          {errors.sku && <p className="text-xs text-red-600 mt-0.5">{errors.sku}</p>}
+        </div>
+        <div>
+          <input placeholder="Buying price (Ksh) *" type="number" value={form.buying_price_kes}
+            onChange={e => updateField('buying_price_kes', e.target.value)} onBlur={() => handleBlur('buying_price_kes')}
+            className={`w-full ${fieldClass('buying_price_kes')}`} />
+          {errors.buying_price_kes && <p className="text-xs text-red-600 mt-0.5">{errors.buying_price_kes}</p>}
+        </div>
       </div>
-      <input placeholder="Full description (shown to customers)" value={form.description}
-        onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-        className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
+      <div>
+        <input placeholder="Full description (shown to customers) *" value={form.description}
+          onChange={e => updateField('description', e.target.value)} onBlur={() => handleBlur('description')}
+          className={`w-full ${fieldClass('description')}`} />
+        {errors.description && <p className="text-xs text-red-600 mt-0.5">{errors.description}</p>}
+      </div>
       <div className="grid grid-cols-2 gap-2">
-        <input placeholder={`${meta.capacityLabel} (${meta.capacityUnit})`} type="number" value={form.capacity}
-          onChange={e => setForm(f => ({ ...f, capacity: e.target.value }))}
-          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
-        <input placeholder="Weight (kg)" type="number" value={form.unit_weight_kg}
-          onChange={e => setForm(f => ({ ...f, unit_weight_kg: e.target.value }))}
-          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
+        <input placeholder={`${meta.capacityLabel} (${meta.capacityUnit}) — optional`} type="number" value={form.capacity}
+          onChange={e => updateField('capacity', e.target.value)}
+          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
+        <input placeholder="Weight (kg) — optional" type="number" value={form.unit_weight_kg}
+          onChange={e => updateField('unit_weight_kg', e.target.value)}
+          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
       </div>
       <div>
         <label className="block text-xs text-gray-500 mb-1">VAT status</label>
-        <select value={form.vat_status} onChange={e => setForm(f => ({ ...f, vat_status: e.target.value }))}
-          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white">
+        <select value={form.vat_status} onChange={e => updateField('vat_status', e.target.value)}
+          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white outline-none focus:border-blue-400">
           {VAT_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </div>
       <div className="grid grid-cols-3 gap-2">
         {specFields.map(s => (
-          <input key={s.key} placeholder={s.label} type={s.text ? 'text' : 'number'} value={form[s.key]}
-            onChange={e => setForm(f => ({ ...f, [s.key]: e.target.value }))}
-            className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs" />
+          <input key={s.key} placeholder={`${s.label} — optional`} type={s.text ? 'text' : 'number'} value={form[s.key]}
+            onChange={e => updateField(s.key, e.target.value)}
+            className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-blue-400" />
         ))}
       </div>
-      <p className="text-xs text-blue-600">Leave any spec blank if you don't know it yet — it just won't show in the customer comparison.</p>
+      <p className="text-xs text-blue-600">Fields marked * are required. Leave any spec blank if you don't know it yet — it just won't show in the customer comparison.</p>
+      {submitError && <p className="text-xs text-red-600 font-semibold bg-red-50 p-2 rounded-lg">{submitError}</p>}
       <button onClick={save} disabled={saving}
         className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition disabled:opacity-50">
         {saving ? 'Adding…' : 'Add Product'}
