@@ -19,6 +19,7 @@ import AdminReports from './AdminReports.jsx'
 import AdminAccounting from './AdminAccounting.jsx'
 import AdminVendorBills from './AdminVendorBills.jsx'
 import AdminFixedAssets from './AdminFixedAssets.jsx'
+import AdminInvestorSnapshot from './AdminInvestorSnapshot.jsx'
 import { fetchOrgSettings, FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
 
 // KRA VAT categories — 'standard' (taxed at the org's VAT rate), 'zero_rated'
@@ -996,6 +997,7 @@ const SECTIONS = [
   { id: 'accounting',  label: '📚 Accounting' },
   { id: 'fixedassets', label: '🏗️ Fixed Assets' },
   { id: 'reports',     label: '📊 Reports' },
+  { id: 'snapshot',    label: '🚀 Investor Snapshot' },
   { id: 'settings',    label: '⚙️ Settings' },
 ]
 
@@ -1061,7 +1063,7 @@ export default function Admin({ onBack }) {
       )}
 
       {/* Left sidebar — main sections */}
-      <aside className="w-56 shrink-0 bg-gray-900 text-white min-h-screen sticky top-0 flex flex-col">
+      <aside className="w-56 shrink-0 bg-gray-900 text-white min-h-screen sticky top-0 flex flex-col print:hidden">
         <div className="px-5 py-5 border-b border-gray-800">
           <h1 className="text-lg font-black">⚡ RhiPower</h1>
           <p className="text-xs text-gray-400 mt-0.5 truncate">{session.user?.email}</p>
@@ -1083,7 +1085,7 @@ export default function Admin({ onBack }) {
 
       {/* Right side: top bar (sub-navigation for the active section) + content */}
       <div className="flex-1 min-w-0">
-        <div className="bg-white border-b border-gray-100 px-6 py-3 sticky top-0 z-10">
+        <div className="bg-white border-b border-gray-100 px-6 py-3 sticky top-0 z-10 print:hidden">
           {activeTab === 'inventory' ? (
             <div className="flex gap-1 bg-gray-100 rounded-2xl p-1 w-fit">
               {INVENTORY_SUBS.map(s => (
@@ -1101,7 +1103,7 @@ export default function Admin({ onBack }) {
           )}
         </div>
 
-        <div className="max-w-7xl px-4 py-6">
+        <div className="max-w-7xl px-4 py-6 print:max-w-none print:px-0 print:py-0">
           {activeTab === 'home'        && <AdminHome session={session} onNavigate={navigateTo} />}
           {activeTab === 'leads'       && <AdminLeads session={session} onNavigate={navigateTo} focusId={focusId} business={business} />}
           {activeTab === 'inventory'   && <InventoryTable session={session} invSection={invSection} />}
@@ -1114,6 +1116,7 @@ export default function Admin({ onBack }) {
           {activeTab === 'accounting'  && <AdminAccounting session={session} />}
           {activeTab === 'fixedassets' && <AdminFixedAssets session={session} />}
           {activeTab === 'reports'     && <AdminReports session={session} />}
+          {activeTab === 'snapshot'    && <AdminInvestorSnapshot business={business} />}
           {activeTab === 'settings'    && <AdminSettings session={session} onSettingsChanged={setBusiness} />}
         </div>
       </div>
