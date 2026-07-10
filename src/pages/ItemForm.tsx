@@ -42,8 +42,8 @@ const CHEMISTRY_TYPE_OPTIONS = Object.entries(CHEMISTRY_TYPE_LABELS).map(([value
 interface DimensionsForm { lengthMm: string; widthMm: string; thicknessMm: string }
 interface ElectricalForm { nominalVoltageV: string; maxCurrentAmps: string }
 interface EnvironmentalForm { operatingTempMinC: string; operatingTempMaxC: string; ipRating: string }
-interface PanelForm { efficiencyPct: string; warrantyYears: string; degradationPctYr: string; cellType: string; tempCoefficientPctC: string }
-interface InverterForm { efficiencyPct: string; warrantyYears: string; mpptCount: string; phase: string; inverterType: string; continuousPowerW: string; surgePowerW: string; commProtocols: string }
+interface PanelForm { efficiencyPct: string; warrantyYears: string; degradationPctYr: string; cellType: string; tempCoefficientPctC: string; vocV: string }
+interface InverterForm { efficiencyPct: string; warrantyYears: string; mpptCount: string; phase: string; inverterType: string; continuousPowerW: string; surgePowerW: string; commProtocols: string; mpptMinVoltageV: string; mpptMaxVoltageV: string; maxInputVoltageV: string }
 interface BatteryForm { cycleLife: string; dodPct: string; warrantyYears: string; chemistryType: string; maxChargeRateC: string }
 
 interface FormState {
@@ -65,6 +65,8 @@ interface FormState {
   supplier: string
   inStock: boolean
   reason: string
+  imageUrl: string
+  datasheetUrl: string
 }
 
 const numToStr = (n: number | null | undefined): string => (n == null ? '' : String(n))
@@ -98,6 +100,7 @@ function specToFormState(spec: ItemSpec, editRow?: Record<string, any> | null): 
       degradationPctYr: numToStr(spec.panel?.degradationPctYr),
       cellType: spec.panel?.cellType ?? '',
       tempCoefficientPctC: numToStr(spec.panel?.tempCoefficientPctC),
+      vocV: numToStr(spec.panel?.vocV),
     },
     inverter: {
       efficiencyPct: numToStr(spec.inverter?.efficiencyPct),
@@ -108,6 +111,9 @@ function specToFormState(spec: ItemSpec, editRow?: Record<string, any> | null): 
       continuousPowerW: numToStr(spec.inverter?.continuousPowerW),
       surgePowerW: numToStr(spec.inverter?.surgePowerW),
       commProtocols: spec.inverter?.commProtocols ?? '',
+      mpptMinVoltageV: numToStr(spec.inverter?.mpptMinVoltageV),
+      mpptMaxVoltageV: numToStr(spec.inverter?.mpptMaxVoltageV),
+      maxInputVoltageV: numToStr(spec.inverter?.maxInputVoltageV),
     },
     battery: {
       cycleLife: numToStr(spec.battery?.cycleLife),
@@ -121,6 +127,8 @@ function specToFormState(spec: ItemSpec, editRow?: Record<string, any> | null): 
     supplier: editRow?.supplier || '',
     inStock: editRow?.in_stock !== false,
     reason: '',
+    imageUrl: editRow?.image_url || '',
+    datasheetUrl: editRow?.datasheet_url || '',
   }
 }
 
@@ -209,6 +217,7 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
         degradationPctYr: blankToNull(form.panel.degradationPctYr),
         cellType: blankToNull(form.panel.cellType),
         tempCoefficientPctC: blankToNull(form.panel.tempCoefficientPctC),
+        vocV: blankToNull(form.panel.vocV),
       } : null,
       inverter: category === 'inverter' ? {
         efficiencyPct: blankToNull(form.inverter.efficiencyPct),
@@ -219,6 +228,9 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
         continuousPowerW: blankToNull(form.inverter.continuousPowerW),
         surgePowerW: blankToNull(form.inverter.surgePowerW),
         commProtocols: blankToNull(form.inverter.commProtocols),
+        mpptMinVoltageV: blankToNull(form.inverter.mpptMinVoltageV),
+        mpptMaxVoltageV: blankToNull(form.inverter.mpptMaxVoltageV),
+        maxInputVoltageV: blankToNull(form.inverter.maxInputVoltageV),
       } : null,
       battery: category === 'battery' ? {
         cycleLife: blankToNull(form.battery.cycleLife),
@@ -248,6 +260,8 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
       payload.reorder_point = form.reorderPoint === '' ? null : parseInt(form.reorderPoint, 10)
       payload.supplier = form.supplier.trim() || null
       payload.in_stock = form.inStock
+      payload.image_url = form.imageUrl || null
+      payload.datasheet_url = form.datasheetUrl || null
       payload.updated_at = new Date().toISOString()
 
       // Non-null: this form only renders post-admin-login, which itself
@@ -276,6 +290,30 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
       logAdminAction(session, 'product_added', roleKey, { category, sku: data.sku })
       onSaved(data)
     }
+  }
+
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  const [uploadingDatasheet, setUploadingDatasheet] = useState(false)
+  const [assetError, setAssetError] = useState('')
+
+  // Uploads straight to Storage on file select (same pattern as
+  // SiteVisitsPanel.jsx's VisitPhotos) — but only writes the resulting
+  // public URL into inventory_prices once the main Save button is clicked,
+  // so a photo pick doesn't silently commit ahead of the rest of the form.
+  // `upsert: true` lets "Replace" overwrite the same path instead of
+  // erroring on an existing file.
+  async function uploadAsset(file: File, kind: 'photo' | 'datasheet') {
+    if (!editRow) return
+    const setUploading = kind === 'photo' ? setUploadingPhoto : setUploadingDatasheet
+    setUploading(true); setAssetError('')
+    const ext = kind === 'photo' ? (file.name.split('.').pop() || 'jpg') : 'pdf'
+    const path = `${editRow.role_key}/${kind}.${ext}`
+    const { error: upErr } = await supabase!.storage.from('product-assets').upload(path, file, { upsert: true })
+    setUploading(false)
+    if (upErr) { setAssetError(upErr.message); return }
+    const { data } = supabase!.storage.from('product-assets').getPublicUrl(path)
+    if (kind === 'photo') updateTop('imageUrl', data.publicUrl)
+    else updateTop('datasheetUrl', data.publicUrl)
   }
 
   const fieldClass = (key: string) =>
@@ -400,7 +438,10 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
                   onChange={e => updateGroup('panel', 'cellType', e.target.value)} options={CELL_TYPE_OPTIONS} />
                 <TextField path="panel.tempCoefficientPctC" placeholder="Temp coefficient (%/°C) — optional" value={form.panel.tempCoefficientPctC}
                   onChange={e => updateGroup('panel', 'tempCoefficientPctC', e.target.value)} />
+                <TextField path="panel.vocV" placeholder="Voc — open-circuit voltage (V) — optional" value={form.panel.vocV}
+                  onChange={e => updateGroup('panel', 'vocV', e.target.value)} />
               </div>
+              <p className="text-[11px] text-gray-400 mt-1">Voc (above) plus the Electrical section's Nominal Voltage (Vmp) and Max Current (Isc) are what let RhiPower check this panel is compatible with a chosen inverter's MPPT input.</p>
             </div>
           )}
 
@@ -427,7 +468,14 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
                     onChange={e => updateGroup('inverter', 'commProtocols', e.target.value)}
                     className={`w-full ${fieldClass('inverter.commProtocols')}`} />
                 </div>
+                <TextField path="inverter.mpptMinVoltageV" placeholder="MPPT min voltage (V) — optional" value={form.inverter.mpptMinVoltageV}
+                  onChange={e => updateGroup('inverter', 'mpptMinVoltageV', e.target.value)} />
+                <TextField path="inverter.mpptMaxVoltageV" placeholder="MPPT max voltage (V) — optional" value={form.inverter.mpptMaxVoltageV}
+                  onChange={e => updateGroup('inverter', 'mpptMaxVoltageV', e.target.value)} />
+                <TextField path="inverter.maxInputVoltageV" placeholder="Absolute max DC input (V) — optional" value={form.inverter.maxInputVoltageV}
+                  onChange={e => updateGroup('inverter', 'maxInputVoltageV', e.target.value)} />
               </div>
+              <p className="text-[11px] text-gray-400 mt-1">MPPT window + max input voltage (above) plus the Electrical section's Max Current are what let RhiPower check a chosen panel is compatible with this inverter's MPPT input.</p>
             </div>
           )}
 
@@ -449,6 +497,37 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
             </div>
           )}
         </>
+      )}
+
+      {isEdit && isProductCategory && (
+        <div className="pt-2 border-t border-gray-100">
+          <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Assets</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-xs text-gray-500 mb-1">Product photo</div>
+              {form.imageUrl && (
+                <img src={form.imageUrl} alt="Product" className="w-20 h-20 object-cover rounded-lg border border-gray-200 mb-1.5" />
+              )}
+              <label className="inline-block text-xs font-bold text-blue-600 hover:text-blue-800 cursor-pointer">
+                {uploadingPhoto ? 'Uploading…' : form.imageUrl ? 'Replace photo' : '+ Upload photo'}
+                <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" disabled={uploadingPhoto}
+                  onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) uploadAsset(f, 'photo') }} />
+              </label>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 mb-1">Datasheet (PDF)</div>
+              {form.datasheetUrl && (
+                <a href={form.datasheetUrl} target="_blank" rel="noreferrer" className="block text-xs text-blue-600 underline mb-1.5">View current datasheet</a>
+              )}
+              <label className="inline-block text-xs font-bold text-blue-600 hover:text-blue-800 cursor-pointer">
+                {uploadingDatasheet ? 'Uploading…' : form.datasheetUrl ? 'Replace datasheet' : '+ Upload datasheet'}
+                <input type="file" accept="application/pdf" className="hidden" disabled={uploadingDatasheet}
+                  onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) uploadAsset(f, 'datasheet') }} />
+              </label>
+            </div>
+          </div>
+          {assetError && <p className="text-xs text-red-600 mt-1.5">{assetError}</p>}
+        </div>
       )}
 
       {isEdit && (

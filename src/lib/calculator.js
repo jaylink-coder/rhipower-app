@@ -3,6 +3,7 @@
 
 import { DEFAULT_PRODUCTS, TIER_META, ZONES as DEFAULT_ZONES } from '../data/skuInventory.js'
 import { pickDefaultProduct } from './tierProducts.js'
+import { calculateStringBalancing } from './stringBalancing.ts'
 
 const PEAK_SUN_HOURS = {
   nanyuki: 5.5,
@@ -131,18 +132,56 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
   // read as the panels' rated capacity, not the heat-adjusted effective one.
   const truePVkW   = (panelQty * panel.wattsEach) / 1000
 
+  // 5b. MPPT STRING BALANCING — only engages once the selected panel has
+  // Voc/Vmp/Isc (migration 031's vocV, plus 029's nominalVoltageV/
+  // maxCurrentAmps reused as Vmp/Isc) and the selected inverter has its
+  // MPPT window populated. Today's inventory has none of this, so
+  // stringConfig stays null and the crude "16 panels per combiner branch"
+  // guess below is used exactly as it always has been.
+  let stringConfig = null
+  if (panel.vocV != null && panel.nominalVoltageV != null && panel.maxCurrentAmps != null &&
+      inverter.maxInputVoltageV != null && inverter.mpptMinVoltageV != null && inverter.maxCurrentAmps != null) {
+    const balancing = calculateStringBalancing(
+      { vocV: panel.vocV, vmpV: panel.nominalVoltageV, iscA: panel.maxCurrentAmps, tempCoefficientPctC: panel.tempCoefficientPctC ?? 0 },
+      { maxInputVoltageV: inverter.maxInputVoltageV, mpptMinVoltageV: inverter.mpptMinVoltageV, maxCurrentAmps: inverter.maxCurrentAmps, mpptCount: inverter.mpptCount || 1 },
+    )
+    if (balancing.isCompatible) {
+      // As close to maxPanelsPerString as the actual panel count allows —
+      // fewer, longer strings means fewer combiner-box parts.
+      const panelsPerString = Math.max(balancing.minPanelsPerString, Math.min(balancing.maxPanelsPerString, panelQty))
+      const stringCount     = Math.ceil(panelQty / panelsPerString)
+      const stringsPerInverterUnit = balancing.maxParallelStringsPerMppt * (inverter.mpptCount || 1)
+      let inverterUpsizedForStrings = false
+      if (stringCount > stringsPerInverterUnit * inverterQty) {
+        // Never blocks the quote — bumps inverter quantity so there's
+        // enough MPPT capacity to actually host every string, same
+        // non-blocking upsize pattern as the C-rate/surge checks above.
+        inverterQty     = Math.max(inverterQty, Math.ceil(stringCount / stringsPerInverterUnit))
+        totalInverterKW = inverterQty * inverter.kwEach
+        inverterUpsizedForStrings = true
+      }
+      stringConfig = {
+        panelsPerString, stringCount, inverterUpsizedForStrings,
+        mpptTrackersUsed: Math.min((inverter.mpptCount || 1) * inverterQty, stringCount),
+      }
+    } else {
+      stringConfig = { bottleneckReason: balancing.bottleneckReason }
+    }
+  }
+  const stringsForBOM = stringConfig?.stringCount ?? Math.ceil(panelQty / 16)
+
   // 6. CABLE SIZING
   const cableIsHeavy = wireDistM > 120
   const cableSKU     = cableIsHeavy ? z.zoneA[4] : z.zoneA[3]
   const cableSpec    = cableIsHeavy
     ? `10mm² Copper DC Solar Cable (required for ${wireDistM}m run — keeps voltage drop below 2%)`
     : `6mm² Copper DC Solar Cable (suitable for ${wireDistM}m run)`
-  const cableMeters  = Math.ceil(wireDistM * 2 * Math.ceil(panelQty / 16))
+  const cableMeters  = Math.ceil(wireDistM * 2 * stringsForBOM)
 
   // 7. ZONE A BOM (Solar Combiner Box)
   const qtyBreaker = inverterQty * 2
   const qtySPD     = inverterQty * 2
-  const qtyFuses   = Math.ceil(panelQty / 16) * 2
+  const qtyFuses   = stringsForBOM * 2
 
   // Mounting scales with array size (Ksh/kWp); earthing/lightning protection is
   // one code-mandated kit per system regardless of size.
@@ -261,6 +300,10 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
       tempDerateFactor:        Math.round(tempDerateFactor * 1000) / 1000,
       batteryUpsizedForCRate,
       inverterUpsizedForSurge,
+      // Only populated once the selected panel + inverter both have full
+      // MPPT electrical specs (migration 031) — null for every quote until
+      // then, and the Zone A BOM falls back to the /16 heuristic.
+      stringConfig,
     },
     // Metadata
     heavyMotorCount, wireDistM, siteKm, totalWeightKg,

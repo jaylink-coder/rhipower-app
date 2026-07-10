@@ -85,6 +85,9 @@ export const PanelSpecSchema = z.object({
   degradationPctYr: anyNumber(),
   cellType: z.enum(CELL_TYPES).nullable().optional(),
   tempCoefficientPctC: anyNumber(),
+  // Open-circuit voltage — higher than Vmp (electrical.nominalVoltageV),
+  // the value that matters for MPPT string-balancing (see stringBalancing.ts).
+  vocV: positive(),
 })
 export type PanelSpec = z.infer<typeof PanelSpecSchema>
 
@@ -97,6 +100,11 @@ export const InverterSpecSchema = z.object({
   continuousPowerW: positive(),
   surgePowerW: positive(),
   commProtocols: z.string().trim().nullable().optional(),
+  // MPPT tracking window + absolute max DC input — used by
+  // stringBalancing.ts to check a chosen panel actually fits this inverter.
+  mpptMinVoltageV: positive(),
+  mpptMaxVoltageV: positive(),
+  maxInputVoltageV: positive(),
 })
 export type InverterSpec = z.infer<typeof InverterSpecSchema>
 
@@ -156,6 +164,7 @@ export function flatRowToSpec(row: Record<string, any> | null | undefined, categ
       degradationPctYr: row?.degradation_pct_yr != null ? Number(row.degradation_pct_yr) : null,
       cellType: (row?.cell_type ?? null) as CellType | null,
       tempCoefficientPctC: row?.temp_coefficient_pct_c != null ? Number(row.temp_coefficient_pct_c) : null,
+      vocV: row?.voc_v != null ? Number(row.voc_v) : null,
     } : null,
     inverter: category === 'inverter' ? {
       efficiencyPct: row?.efficiency_pct != null ? Number(row.efficiency_pct) : null,
@@ -166,6 +175,9 @@ export function flatRowToSpec(row: Record<string, any> | null | undefined, categ
       continuousPowerW: row?.continuous_power_w != null ? Number(row.continuous_power_w) : null,
       surgePowerW: row?.surge_power_w != null ? Number(row.surge_power_w) : null,
       commProtocols: row?.comm_protocols ?? null,
+      mpptMinVoltageV: row?.mppt_min_voltage_v != null ? Number(row.mppt_min_voltage_v) : null,
+      mpptMaxVoltageV: row?.mppt_max_voltage_v != null ? Number(row.mppt_max_voltage_v) : null,
+      maxInputVoltageV: row?.max_input_voltage_v != null ? Number(row.max_input_voltage_v) : null,
     } : null,
     battery: category === 'battery' ? {
       cycleLife: row?.cycle_life != null ? Number(row.cycle_life) : null,
@@ -202,6 +214,7 @@ export function specToFlatRow(spec: ItemSpec, category: ItemCategory): Record<st
     row.degradation_pct_yr = spec.panel.degradationPctYr ?? null
     row.cell_type = spec.panel.cellType ?? null
     row.temp_coefficient_pct_c = spec.panel.tempCoefficientPctC ?? null
+    row.voc_v = spec.panel.vocV ?? null
   }
   if (category === 'inverter' && spec.inverter) {
     row.efficiency_pct = spec.inverter.efficiencyPct ?? null
@@ -212,6 +225,9 @@ export function specToFlatRow(spec: ItemSpec, category: ItemCategory): Record<st
     row.continuous_power_w = spec.inverter.continuousPowerW ?? null
     row.surge_power_w = spec.inverter.surgePowerW ?? null
     row.comm_protocols = spec.inverter.commProtocols ?? null
+    row.mppt_min_voltage_v = spec.inverter.mpptMinVoltageV ?? null
+    row.mppt_max_voltage_v = spec.inverter.mpptMaxVoltageV ?? null
+    row.max_input_voltage_v = spec.inverter.maxInputVoltageV ?? null
   }
   if (category === 'battery' && spec.battery) {
     row.cycle_life = spec.battery.cycleLife ?? null

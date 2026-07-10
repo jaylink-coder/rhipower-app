@@ -163,6 +163,19 @@ function EngineerMath({ eng, results, autoOpen = false }) {
                 ⚠️ Panel count includes a temperature derate — this panel's real-world output at a hot rooftop is estimated at {(eng.tempDerateFactor * 100).toFixed(1)}% of its nameplate rating, so extra panels cover the shortfall.
               </div>
             )}
+            {eng.stringConfig?.stringCount != null && (
+              <div className="text-gray-600 not-italic font-sans">MPPT string layout: <span className="font-bold text-gray-900">{eng.stringConfig.panelsPerString} panels/string × {eng.stringConfig.stringCount} string{eng.stringConfig.stringCount !== 1 ? 's' : ''}, {eng.stringConfig.mpptTrackersUsed} MPPT tracker{eng.stringConfig.mpptTrackersUsed !== 1 ? 's' : ''} used</span></div>
+            )}
+            {eng.stringConfig?.inverterUpsizedForStrings && (
+              <div className="mt-1 not-italic font-sans text-xs text-orange-600 font-semibold">
+                ⚠️ Inverter quantity upsized beyond the power figures above — extra MPPT tracker capacity was needed to host every string.
+              </div>
+            )}
+            {eng.stringConfig?.bottleneckReason && (
+              <div className="mt-1 not-italic font-sans text-xs text-red-600 font-semibold">
+                ⚠️ {eng.stringConfig.bottleneckReason} (quote still generated — flag this pairing for review before ordering.)
+              </div>
+            )}
           </div>
 
           <div className="border-l-4 border-red-300 pl-4 space-y-1">

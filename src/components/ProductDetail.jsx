@@ -37,6 +37,13 @@ export default function ProductDetail({ category, product, isSelected, onSelect,
 
           <div className="text-3xl font-black font-mono text-gray-900 mb-5">{formatKsh(product.cost)}</div>
 
+          {product.datasheetUrl && (
+            <a href={product.datasheetUrl} target="_blank" rel="noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm font-bold text-blue-600 hover:text-blue-800 mb-5">
+              📄 Download Datasheet (PDF)
+            </a>
+          )}
+
           {specs.length > 0 && (
             <div className="border-2 border-gray-100 rounded-xl overflow-hidden mb-5">
               <div className="bg-gray-50 px-4 py-2 text-xs font-bold uppercase text-gray-500 tracking-wider">Specifications</div>

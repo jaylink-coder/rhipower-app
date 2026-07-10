@@ -27,6 +27,7 @@ export function productSpecRows(category, p) {
     if (p.warrantyYears)    rows.push(['Warranty', `${p.warrantyYears} yr`])
     if (p.degradationPctYr) rows.push(['Degradation', `${p.degradationPctYr}%/yr`])
     if (p.tempCoefficientPctC != null) rows.push(['Temp coefficient', `${p.tempCoefficientPctC}%/°C`])
+    if (p.vocV)            rows.push(['Voc (open-circuit)', `${p.vocV}V`])
   } else if (category === 'inverter') {
     if (p.kwEach)         rows.push(['Capacity', `${p.kwEach} kW`])
     if (p.inverterType)   rows.push(['Type', INVERTER_TYPE_LABELS[p.inverterType] || p.inverterType])
@@ -34,6 +35,8 @@ export function productSpecRows(category, p) {
     if (p.continuousPowerW) rows.push(['Continuous power', `${p.continuousPowerW}W`])
     if (p.surgePowerW)    rows.push(['Surge power', `${p.surgePowerW}W`])
     if (p.mpptCount)      rows.push(['MPPT', `${p.mpptCount}`])
+    if (p.mpptMinVoltageV && p.mpptMaxVoltageV) rows.push(['MPPT window', `${p.mpptMinVoltageV}V–${p.mpptMaxVoltageV}V`])
+    if (p.maxInputVoltageV) rows.push(['Max DC input', `${p.maxInputVoltageV}V`])
     if (p.phase)          rows.push(['Phase', p.phase])
     if (p.commProtocols)  rows.push(['Comms', p.commProtocols])
     if (p.warrantyYears)  rows.push(['Warranty', `${p.warrantyYears} yr`])

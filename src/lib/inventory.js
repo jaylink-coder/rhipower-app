@@ -44,7 +44,13 @@ export function toProduct(row) {
     commProtocols:       row.comm_protocols || undefined,
     chemistryType:       row.chemistry_type || undefined,
     maxChargeRateC:      row.max_charge_rate_c != null ? Number(row.max_charge_rate_c) : undefined,
+    // MPPT string-balancing fields (migration 031)
+    vocV:                row.voc_v != null ? Number(row.voc_v) : undefined,
+    mpptMinVoltageV:     row.mppt_min_voltage_v  != null ? Number(row.mppt_min_voltage_v)  : undefined,
+    mpptMaxVoltageV:     row.mppt_max_voltage_v  != null ? Number(row.mppt_max_voltage_v)  : undefined,
+    maxInputVoltageV:    row.max_input_voltage_v != null ? Number(row.max_input_voltage_v) : undefined,
     imageUrl:         row.image_url || undefined,
+    datasheetUrl:     row.datasheet_url || undefined,
     itemCode:         row.item_code != null ? Number(row.item_code) : undefined,
     inStock:          row.in_stock !== false,
     isActive:         row.is_active !== false,
