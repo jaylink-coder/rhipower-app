@@ -985,23 +985,39 @@ function InventoryTable({ session, invSection }) {
 }
 
 // ── Main admin panel — auth gate + tabs ─────────────────────────────────────
-const SECTIONS = [
-  { id: 'home',        label: '🏠 Command Centre' },
-  { id: 'neworder',    label: '🛒 New Order (Phone/Walk-in)' },
-  { id: 'leads',       label: '📋 Leads & Pipeline' },
-  { id: 'inventory',   label: '📦 Inventory & Prices' },
-  { id: 'suppliers',   label: '🏭 Suppliers' },
-  { id: 'purchasing',  label: '🧾 Purchase Orders' },
-  { id: 'vendorbills', label: '💳 Vendor Bills' },
-  { id: 'salesorders', label: '📑 Sales Orders' },
-  { id: 'invoices',    label: '💵 Invoices' },
-  { id: 'customers',   label: '👥 Customers' },
-  { id: 'accounting',  label: '📚 Accounting' },
-  { id: 'fixedassets', label: '🏗️ Fixed Assets' },
-  { id: 'reports',     label: '📊 Reports' },
-  { id: 'snapshot',    label: '🚀 Investor Snapshot' },
-  { id: 'settings',    label: '⚙️ Settings' },
+// Grouped by function (Sales & CRM / Purchasing & Inventory / Finance /
+// System) now that the flat list grew to 15 tabs — Command Centre stays
+// ungrouped at top since it's the default landing tab, not a category
+// member. SECTIONS stays a flat list (derived below) since the top-bar
+// title lookup and the tab-content switch don't care about grouping.
+const NAV_GROUPS = [
+  { title: null, items: [
+    { id: 'home', label: '🏠 Command Centre' },
+  ]},
+  { title: 'Sales & CRM', items: [
+    { id: 'neworder',    label: '🛒 New Order (Phone/Walk-in)' },
+    { id: 'leads',       label: '📋 Leads & Pipeline' },
+    { id: 'salesorders', label: '📑 Sales Orders' },
+    { id: 'invoices',    label: '💵 Invoices' },
+    { id: 'customers',   label: '👥 Customers' },
+  ]},
+  { title: 'Purchasing & Inventory', items: [
+    { id: 'inventory',   label: '📦 Inventory & Prices' },
+    { id: 'suppliers',   label: '🏭 Suppliers' },
+    { id: 'purchasing',  label: '🧾 Purchase Orders' },
+    { id: 'vendorbills', label: '💳 Vendor Bills' },
+  ]},
+  { title: 'Finance', items: [
+    { id: 'accounting',  label: '📚 Accounting' },
+    { id: 'fixedassets', label: '🏗️ Fixed Assets' },
+    { id: 'reports',     label: '📊 Reports' },
+    { id: 'snapshot',    label: '🚀 Investor Snapshot' },
+  ]},
+  { title: 'System', items: [
+    { id: 'settings', label: '⚙️ Settings' },
+  ]},
 ]
+const SECTIONS = NAV_GROUPS.flatMap(g => g.items)
 
 const INVENTORY_SUBS = [
   { id: 'products',   label: '📦 Products' },
@@ -1070,13 +1086,22 @@ export default function Admin({ onBack }) {
           <h1 className="text-lg font-black">⚡ RhiPower</h1>
           <p className="text-xs text-gray-400 mt-0.5 truncate">{session.user?.email}</p>
         </div>
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          {SECTIONS.map(s => (
-            <button key={s.id} onClick={() => setActiveTab(s.id)}
-              className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-bold transition
-                ${activeTab === s.id ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}>
-              {s.label}
-            </button>
+        <nav className="flex-1 px-3 py-4 space-y-4 overflow-y-auto">
+          {NAV_GROUPS.map((group, gi) => (
+            <div key={gi}>
+              {group.title && (
+                <div className="px-3 pb-1.5 text-[10px] font-black text-gray-500 uppercase tracking-wider">{group.title}</div>
+              )}
+              <div className="space-y-1">
+                {group.items.map(s => (
+                  <button key={s.id} onClick={() => setActiveTab(s.id)}
+                    className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-bold transition
+                      ${activeTab === s.id ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
         <div className="px-3 py-4 border-t border-gray-800 space-y-1">
