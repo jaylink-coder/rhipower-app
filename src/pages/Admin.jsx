@@ -24,6 +24,7 @@ import AdminNewOrder from './AdminNewOrder.jsx'
 import { fetchOrgSettings, FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
 import ItemForm from './ItemForm.tsx'
 import { productSpecRows } from '../lib/productSpecs.js'
+import HardwareCompatibilityMatrix from '../components/HardwareCompatibilityMatrix.jsx'
 
 // KRA VAT categories — 'standard' (taxed at the org's VAT rate), 'zero_rated'
 // (taxed at 0%, still technically vatable) and 'exempt' (no VAT, no input
@@ -570,6 +571,8 @@ function InventoryTable({ session, invSection }) {
 
   if (loading) return <div className="flex items-center justify-center py-20 text-gray-400">Loading inventory…</div>
 
+  if (invSection === 'compatibility') return <HardwareCompatibilityMatrix />
+
   // Panel/Inverter/Battery groups are computed live from whatever rows exist
   // for that category — any number of products, tier shown as a derived badge.
   const productGroups = Object.keys(CATEGORY_META).map(category => {
@@ -783,8 +786,9 @@ const NAV_GROUPS = [
 const SECTIONS = NAV_GROUPS.flatMap(g => g.items)
 
 const INVENTORY_SUBS = [
-  { id: 'products',   label: '📦 Products' },
-  { id: 'components', label: '🔧 BOM Components' },
+  { id: 'products',      label: '📦 Products' },
+  { id: 'components',    label: '🔧 BOM Components' },
+  { id: 'compatibility', label: '🔗 Compatibility' },
 ]
 
 export default function Admin({ onBack }) {
