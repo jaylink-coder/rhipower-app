@@ -1081,7 +1081,7 @@ export default function Admin({ onBack }) {
       )}
 
       {/* Left sidebar — main sections */}
-      <aside className="w-56 shrink-0 bg-gray-900 text-white min-h-screen sticky top-0 flex flex-col print:hidden">
+      <aside className="w-56 shrink-0 bg-gray-900 text-white h-screen sticky top-0 flex flex-col print:hidden">
         <div className="px-5 py-5 border-b border-gray-800">
           <h1 className="text-lg font-black">⚡ RhiPower</h1>
           <p className="text-xs text-gray-400 mt-0.5 truncate">{session.user?.email}</p>
