@@ -129,15 +129,25 @@ function EngineerMath({ eng, results, autoOpen = false }) {
             <div className="text-gray-600">Peak surge demand  = <span className="font-bold text-gray-900">{(eng.maxSurgeWatts/1000).toFixed(2)} kW</span></div>
             <div className="text-gray-600">→ We need: <span className="font-bold text-gray-900">{eng.neededInverterKW} kW inverter capacity</span></div>
             <div className="text-gray-600">→ Selected: <span className="font-bold text-gray-900">{results.inverterQty} × {results.totalInverterKW / results.inverterQty} kW = {results.totalInverterKW} kW total</span></div>
+            {eng.inverterUpsizedForSurge && (
+              <div className="mt-1 not-italic font-sans text-xs text-orange-600 font-semibold">
+                ⚠️ Upsized beyond the continuous-load figure above — the selected inverter's real datasheet surge rating couldn't cover your peak surge demand at the smaller quantity.
+              </div>
+            )}
           </div>
 
           <div className="border-l-4 border-green-400 pl-4 space-y-1 font-mono">
             <div className="font-black text-green-700 not-italic font-sans text-base">STEP 3 — Battery Storage Sizing</div>
-            <div className="text-xs text-gray-400 not-italic font-sans mb-1">Rule: store enough for {eng.backupDays} night{eng.backupDays > 1 ? 's' : ''}, using only 80% capacity (protects battery lifespan)</div>
+            <div className="text-xs text-gray-400 not-italic font-sans mb-1">Rule: store enough for {eng.backupDays} night{eng.backupDays > 1 ? 's' : ''}, using only {eng.dodPctUsed}% capacity ({eng.dodPctUsed === 80 ? 'safety floor' : "this battery's rated depth of discharge"})</div>
             <div className="text-gray-600">Overnight energy / night = <span className="font-bold text-gray-900">{(eng.overnightEnergyWhPerDay/1000).toFixed(2)} kWh</span></div>
             <div className="text-gray-600">× {eng.backupDays} backup day{eng.backupDays > 1 ? 's' : ''} = <span className="font-bold text-gray-900">{(eng.totalOvernightWh/1000).toFixed(2)} kWh</span></div>
-            <div className="text-gray-600">÷ 0.80 DoD safety floor = <span className="font-bold text-gray-900">{eng.neededUsableKWh} kWh needed</span></div>
+            <div className="text-gray-600">÷ {(eng.dodPctUsed/100).toFixed(2)} DoD = <span className="font-bold text-gray-900">{eng.neededUsableKWh} kWh needed</span></div>
             <div className="text-gray-600">→ Selected: <span className="font-bold text-gray-900">{results.batteryQty} × {results.trueBattKWh / results.batteryQty} kWh = {results.trueBattKWh} kWh total</span></div>
+            {eng.batteryUpsizedForCRate && (
+              <div className="mt-1 not-italic font-sans text-xs text-orange-600 font-semibold">
+                ⚠️ Upsized beyond the energy figure above — this battery's real charge-rate (C-rate) limit couldn't deliver the inverter's power draw at the smaller quantity.
+              </div>
+            )}
           </div>
 
           <div className="border-l-4 border-amber-400 pl-4 space-y-1 font-mono">
@@ -148,6 +158,11 @@ function EngineerMath({ eng, results, autoOpen = false }) {
             <div className="text-gray-600">Total daily requirement = <span className="font-bold text-gray-900">{(eng.daytimeKWh + results.trueBattKWh).toFixed(1)} kWh</span></div>
             <div className="text-gray-600">÷ {eng.peakSunHours} peak sun hours (NASA data) = <span className="font-bold text-gray-900">{eng.neededPVkW} kWp needed</span></div>
             <div className="text-gray-600">→ Selected: <span className="font-bold text-gray-900">{results.panelQty} panels × {(results.truePVkW * 1000 / results.panelQty).toFixed(0)}W = {results.truePVkW.toFixed(2)} kWp total</span></div>
+            {eng.tempDerateFactor !== 1 && (
+              <div className="mt-1 not-italic font-sans text-xs text-orange-600 font-semibold">
+                ⚠️ Panel count includes a temperature derate — this panel's real-world output at a hot rooftop is estimated at {(eng.tempDerateFactor * 100).toFixed(1)}% of its nameplate rating, so extra panels cover the shortfall.
+              </div>
+            )}
           </div>
 
           <div className="border-l-4 border-red-300 pl-4 space-y-1">

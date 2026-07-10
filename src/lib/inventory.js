@@ -24,6 +24,26 @@ export function toProduct(row) {
     phase:            row.phase        || undefined,
     cycleLife:        row.cycle_life   != null ? Number(row.cycle_life) : undefined,
     dodPct:           row.dod_pct      != null ? Number(row.dod_pct)    : undefined,
+    // Full component spec schema (migration 029) — dimensions/electrical/
+    // environmental are shared across categories; the rest are category-
+    // specific, but reading them all here is harmless since a panel row
+    // simply never has inverter_type/chemistry_type etc. set.
+    lengthMm:            row.length_mm            != null ? Number(row.length_mm)            : undefined,
+    widthMm:             row.width_mm             != null ? Number(row.width_mm)             : undefined,
+    thicknessMm:         row.thickness_mm         != null ? Number(row.thickness_mm)         : undefined,
+    nominalVoltageV:     row.nominal_voltage_v    != null ? Number(row.nominal_voltage_v)    : undefined,
+    maxCurrentAmps:      row.max_current_amps     != null ? Number(row.max_current_amps)     : undefined,
+    operatingTempMinC:   row.operating_temp_min_c != null ? Number(row.operating_temp_min_c) : undefined,
+    operatingTempMaxC:   row.operating_temp_max_c != null ? Number(row.operating_temp_max_c) : undefined,
+    ipRating:            row.ip_rating || undefined,
+    cellType:            row.cell_type || undefined,
+    tempCoefficientPctC: row.temp_coefficient_pct_c != null ? Number(row.temp_coefficient_pct_c) : undefined,
+    inverterType:        row.inverter_type || undefined,
+    continuousPowerW:    row.continuous_power_w != null ? Number(row.continuous_power_w) : undefined,
+    surgePowerW:         row.surge_power_w      != null ? Number(row.surge_power_w)      : undefined,
+    commProtocols:       row.comm_protocols || undefined,
+    chemistryType:       row.chemistry_type || undefined,
+    maxChargeRateC:      row.max_charge_rate_c != null ? Number(row.max_charge_rate_c) : undefined,
     imageUrl:         row.image_url || undefined,
     itemCode:         row.item_code != null ? Number(row.item_code) : undefined,
     inStock:          row.in_stock !== false,

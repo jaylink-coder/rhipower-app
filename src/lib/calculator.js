@@ -72,21 +72,63 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
   // 2. PEAK SUN HOURS — use real NASA data if available, else fallback table
   const peakSunHours = siteConfig.psh || PEAK_SUN_HOURS[location] || 5.5
 
-  // 3. INVERTER SIZING
+  // 3. INVERTER SIZING (continuous/surge running load)
   const neededInverterKW = Math.max((totalRunningWatts / 1000) * 1.25, maxSurgeWatts / 1000)
-  const inverterQty      = Math.max(1, Math.ceil(neededInverterKW / inverter.kwEach))
-  const totalInverterKW  = inverterQty * inverter.kwEach
+  let inverterQty        = Math.max(1, Math.ceil(neededInverterKW / inverter.kwEach))
+  let totalInverterKW    = inverterQty * inverter.kwEach
 
-  // 4. BATTERY SIZING — scaled by backupDays (80% DOD safety floor)
+  // 4. BATTERY SIZING — scaled by backupDays. DoD uses the selected
+  // battery's real datasheet figure (migration 029's dodPct) once entered;
+  // falls back to the original flat 80% floor when it's still blank, which
+  // is every product until real specs are added — today's numbers for
+  // existing inventory are unchanged.
+  const dodFraction      = battery.dodPct != null ? battery.dodPct / 100 : 0.80
   const totalOvernightWh = overnightEnergyWh * backupDays   // multiply by chosen backup days
-  const neededUsableKWh  = (totalOvernightWh / 1000) / 0.80
-  const batteryQty       = Math.max(1, Math.ceil(neededUsableKWh / battery.kwhEach))
-  const trueBattKWh      = Math.round(batteryQty * battery.kwhEach * 10) / 10
+  const neededUsableKWh  = (totalOvernightWh / 1000) / dodFraction
+  let batteryQty         = Math.max(1, Math.ceil(neededUsableKWh / battery.kwhEach))
+  let trueBattKWh        = Math.round(batteryQty * battery.kwhEach * 10) / 10
 
-  // 5. SOLAR PANEL SIZING
+  // 4b. C-RATE / SURGE CROSS-CHECK — bumps quantities up (never down) when a
+  // real datasheet number reveals the energy-only sizing above isn't enough
+  // to actually deliver the power needed. Both only engage once the
+  // relevant spec is entered; with today's inventory (no products have
+  // maxChargeRateC/surgePowerW set yet) these are no-ops.
+  let batteryUpsizedForCRate = false
+  if (battery.maxChargeRateC != null) {
+    // Battery bank's max continuous discharge power must cover the sized
+    // inverter's continuous draw, not just hold enough total energy.
+    const minKWhForInverterLoad = totalInverterKW / battery.maxChargeRateC
+    if (minKWhForInverterLoad > trueBattKWh) {
+      batteryQty  = Math.max(batteryQty, Math.ceil(minKWhForInverterLoad / battery.kwhEach))
+      trueBattKWh = Math.round(batteryQty * battery.kwhEach * 10) / 10
+      batteryUpsizedForCRate = true
+    }
+  }
+  let inverterUpsizedForSurge = false
+  if (inverter.surgePowerW != null) {
+    // Real datasheet surge rating, replacing the flat 1.25× guess used for
+    // neededInverterKW above once it's known.
+    const minInvertersForSurge = Math.ceil(maxSurgeWatts / inverter.surgePowerW)
+    if (minInvertersForSurge > inverterQty) {
+      inverterQty     = minInvertersForSurge
+      totalInverterKW = inverterQty * inverter.kwEach
+      inverterUpsizedForSurge = true
+    }
+  }
+
+  // 5. SOLAR PANEL SIZING — derated for real-world heat if the panel's
+  // temperature coefficient is known (migration 029's tempCoefficientPctC);
+  // falls back to nameplate wattage, today's exact behavior, when blank.
+  const ASSUMED_CELL_OPERATING_TEMP_C = 60  // rooftop-mounted module in Kenyan sun vs. the 25°C STC rating reference
+  const tempDerateFactor = panel.tempCoefficientPctC != null
+    ? 1 + (panel.tempCoefficientPctC / 100) * (ASSUMED_CELL_OPERATING_TEMP_C - 25)
+    : 1
+  const effectiveWattsEach = panel.wattsEach * tempDerateFactor
   const daytimeKWh = (totalRunningWatts * 7) / 1000  // ~7 hours of daytime load
   const neededPVkW = (trueBattKWh + daytimeKWh) / peakSunHours
-  const panelQty   = Math.max(1, Math.ceil((neededPVkW * 1000) / panel.wattsEach))
+  const panelQty   = Math.max(1, Math.ceil((neededPVkW * 1000) / effectiveWattsEach))
+  // Nameplate total (not derated) — the customer-facing kWp figure should
+  // read as the panels' rated capacity, not the heat-adjusted effective one.
   const truePVkW   = (panelQty * panel.wattsEach) / 1000
 
   // 6. CABLE SIZING
@@ -212,6 +254,13 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
       surgeAppliances,
       cableSpec,
       cableIsHeavy,
+      // Only meaningful once real datasheet specs are entered on a product
+      // (migration 029) — dodPctUsed stays 80 and tempDerateFactor stays 1
+      // for every quote until then, matching today's exact behavior.
+      dodPctUsed:              Math.round(dodFraction * 1000) / 10,
+      tempDerateFactor:        Math.round(tempDerateFactor * 1000) / 1000,
+      batteryUpsizedForCRate,
+      inverterUpsizedForSurge,
     },
     // Metadata
     heavyMotorCount, wireDistM, siteKm, totalWeightKg,

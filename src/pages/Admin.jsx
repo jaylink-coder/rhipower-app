@@ -9,7 +9,7 @@ import SessionTimeoutModal from '../components/SessionTimeoutModal.jsx'
 import { useSessionTimeout } from '../hooks/useSessionTimeout.js'
 import { SESSION_TIMEOUT_MINUTES, SESSION_WARN_MINUTES } from '../lib/roles.js'
 import { logAdminAction } from '../lib/auditLog.js'
-import { logStockMovement } from '../lib/inventory.js'
+import { toProduct } from '../lib/inventory.js'
 import AdminSuppliers from './AdminSuppliers.jsx'
 import AdminPurchaseOrders from './AdminPurchaseOrders.jsx'
 import AdminSalesOrders from './AdminSalesOrders.jsx'
@@ -22,6 +22,8 @@ import AdminFixedAssets from './AdminFixedAssets.jsx'
 import AdminInvestorSnapshot from './AdminInvestorSnapshot.jsx'
 import AdminNewOrder from './AdminNewOrder.jsx'
 import { fetchOrgSettings, FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
+import ItemForm from './ItemForm.tsx'
+import { productSpecRows } from '../lib/productSpecs.js'
 
 // KRA VAT categories — 'standard' (taxed at the org's VAT rate), 'zero_rated'
 // (taxed at 0%, still technically vatable) and 'exempt' (no VAT, no input
@@ -42,27 +44,6 @@ const CATEGORY_META = {
   panel:    { title: '☀️ Solar Panels', capacityField: 'watts_each', capacityLabel: 'Watts',  capacityUnit: 'W'   },
   inverter: { title: '⚡ Inverters',    capacityField: 'kw_each',    capacityLabel: 'Capacity', capacityUnit: 'kW' },
   battery:  { title: '🔋 Batteries',    capacityField: 'kwh_each',   capacityLabel: 'Capacity', capacityUnit: 'kWh'},
-}
-
-// Extra comparison-spec fields per category (see migration 007) — shown in
-// the Add/Edit Item form, entirely optional so nothing is ever guessed.
-const SPEC_FIELDS = {
-  panel:    [
-    { key: 'efficiency_pct',     label: 'Efficiency (%)' },
-    { key: 'warranty_years',     label: 'Warranty (yr)' },
-    { key: 'degradation_pct_yr', label: 'Degradation (%/yr)' },
-  ],
-  inverter: [
-    { key: 'efficiency_pct', label: 'Efficiency (%)' },
-    { key: 'warranty_years', label: 'Warranty (yr)' },
-    { key: 'mppt_count',     label: 'MPPT count' },
-    { key: 'phase',          label: 'Phase (single/three)', text: true },
-  ],
-  battery:  [
-    { key: 'cycle_life',     label: 'Cycle life' },
-    { key: 'dod_pct',        label: 'DoD (%)' },
-    { key: 'warranty_years', label: 'Warranty (yr)' },
-  ],
 }
 
 // ── Zone groups (unchanged — shared BOM parts, not price-banded) ───────────
@@ -225,208 +206,11 @@ function PriceBandsPanel({ priceBands, session, onChange }) {
   )
 }
 
-// New-product form — any number of products per category, tier derived from price.
-// One form, two modes — this is the ONLY place any item field gets
-// edited anywhere in the app. 'add' inserts a new item (optionally
-// prefilled from cloneFrom); 'edit' updates an existing one in place,
-// including stock levels, which used to have their own separate inline
-// editor on the table row. Two forms editing the same fields with two
-// different pieces of state was exactly the bug this replaced — one
-// piece of state, one save path, reached only via a single "Edit" button.
-function ItemForm({ category, mode, editRow, cloneFrom, onSaved, onCancel, session }) {
-  // BOM/Zone-component items (breakers, cable, mounting hardware, etc.)
-  // aren't in CATEGORY_META/SPEC_FIELDS — those only cover the three
-  // product categories (panel/inverter/battery) that have a capacity spec
-  // sheet. Edit mode has to work for both, so meta/capacity/specs are all
-  // optional here rather than assumed present.
-  const meta = CATEGORY_META[category] || null
-  const specFields = SPEC_FIELDS[category] || []
-  const isEdit = mode === 'edit'
-
-  const blank = () => {
-    const source = isEdit ? editRow : cloneFrom
-    if (source) {
-      const f = {
-        sku: isEdit ? source.sku : `${source.sku} (copy)`, description: source.description,
-        buying_price_kes: String(source.buying_price_kes ?? ''),
-        unit_weight_kg: source.unit_weight_kg != null ? String(source.unit_weight_kg) : '',
-        capacity: meta && source[meta.capacityField] != null ? String(source[meta.capacityField]) : '',
-        vat_status: source.vat_status || 'standard',
-      }
-      if (isEdit) {
-        f.stock_qty     = source.stock_qty     != null ? String(source.stock_qty)     : ''
-        f.reorder_point = source.reorder_point != null ? String(source.reorder_point) : ''
-        f.supplier      = source.supplier || ''
-        f.in_stock      = source.in_stock !== false
-        f.reason        = ''
-      }
-      specFields.forEach(s => { f[s.key] = source[s.key] != null ? String(source[s.key]) : '' })
-      return f
-    }
-    const f = { sku: '', description: '', buying_price_kes: '', unit_weight_kg: '', capacity: '', vat_status: 'standard' }
-    specFields.forEach(s => { f[s.key] = '' })
-    return f
-  }
-  const [form,   setForm]   = useState(blank())
-  const [errors, setErrors] = useState({})
-  const [submitError, setSubmitError] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  // Inline, on-blur validation — errors show immediately next to the field
-  // that caused them rather than only surfacing (or worse, silently doing
-  // nothing) when the save button is clicked.
-  function validateField(key, value) {
-    if (key === 'sku' && !value.trim()) return 'Brand/model is required.'
-    if (key === 'description' && !value.trim()) return 'Description is required.'
-    if (key === 'buying_price_kes') {
-      if (!value) return 'Buying price is required.'
-      if (parseFloat(value) <= 0) return 'Buying price must be greater than zero.'
-    }
-    return null
-  }
-  function handleBlur(key) {
-    const msg = validateField(key, form[key])
-    setErrors(e => ({ ...e, [key]: msg }))
-  }
-  function updateField(key, value) {
-    setForm(f => ({ ...f, [key]: value }))
-    if (errors[key]) setErrors(e => ({ ...e, [key]: null }))
-  }
-
-  async function save() {
-    const required = ['sku', 'description', 'buying_price_kes']
-    const nextErrors = {}
-    required.forEach(key => { const msg = validateField(key, form[key]); if (msg) nextErrors[key] = msg })
-    if (Object.keys(nextErrors).length > 0) { setErrors(nextErrors); return }
-
-    setSaving(true); setSubmitError('')
-    const payload = {
-      sku: form.sku.trim(), description: form.description.trim(),
-      buying_price_kes: parseFloat(form.buying_price_kes),
-      vat_status: form.vat_status || 'standard',
-    }
-    payload.unit_weight_kg = form.unit_weight_kg === '' ? null : parseFloat(form.unit_weight_kg)
-    if (meta) payload[meta.capacityField] = form.capacity === '' ? null : parseFloat(form.capacity)
-    specFields.forEach(s => { payload[s.key] = form[s.key] === '' ? null : (s.text ? form[s.key] : parseFloat(form[s.key])) })
-
-    if (isEdit) {
-      payload.stock_qty     = form.stock_qty     === '' ? null : parseInt(form.stock_qty, 10)
-      payload.reorder_point = form.reorder_point === '' ? null : parseInt(form.reorder_point, 10)
-      payload.supplier      = form.supplier.trim() || null
-      payload.in_stock      = form.in_stock
-      payload.updated_at    = new Date().toISOString()
-
-      const { data, error } = await supabase.from('inventory_prices').update(payload).eq('role_key', editRow.role_key).select().single()
-      setSaving(false)
-      if (error) { setSubmitError(error.message); return }
-
-      const priceChanged = parseFloat(form.buying_price_kes) !== Number(editRow.buying_price_kes || 0)
-      const qtyDelta = payload.stock_qty != null ? payload.stock_qty - (editRow.stock_qty || 0) : 0
-      logAdminAction(session, 'item_updated', editRow.role_key, { sku: data.sku })
-      if (priceChanged) logAdminAction(session, 'price_update', editRow.role_key, { from: editRow.buying_price_kes, to: payload.buying_price_kes })
-      if (qtyDelta !== 0) await logStockMovement({ roleKey: editRow.role_key, quantityChanged: qtyDelta, reason: form.reason?.trim(), session })
-      onSaved(data)
-    } else {
-      const roleKey = `${category}_${form.sku.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${Date.now().toString(36)}`
-      payload.role_key = roleKey
-      payload.category = category
-      payload.tier = 'balanced'
-      payload.unit = 'each'
-
-      const { data, error } = await supabase.from('inventory_prices').insert(payload).select().single()
-      setSaving(false)
-      if (error) { setSubmitError(error.message); return }
-      logAdminAction(session, 'product_added', roleKey, { category, sku: data.sku })
-      onSaved(data)
-    }
-  }
-
-  const fieldClass = key => `border rounded-lg px-2 py-1.5 text-sm outline-none ${errors[key] ? 'border-red-400 focus:border-red-500' : 'border-gray-200 focus:border-blue-400'}`
-
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-3">
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <input placeholder="Brand / model (e.g. JA Solar 700W N-Type) *" value={form.sku}
-            onChange={e => updateField('sku', e.target.value)} onBlur={() => handleBlur('sku')}
-            className={`w-full ${fieldClass('sku')}`} />
-          {errors.sku && <p className="text-xs text-red-600 mt-0.5">{errors.sku}</p>}
-        </div>
-        <div>
-          <input placeholder="Buying price (Ksh) *" type="number" value={form.buying_price_kes}
-            onChange={e => updateField('buying_price_kes', e.target.value)} onBlur={() => handleBlur('buying_price_kes')}
-            className={`w-full ${fieldClass('buying_price_kes')}`} />
-          {errors.buying_price_kes && <p className="text-xs text-red-600 mt-0.5">{errors.buying_price_kes}</p>}
-        </div>
-      </div>
-      <div>
-        <input placeholder="Full description (shown to customers) *" value={form.description}
-          onChange={e => updateField('description', e.target.value)} onBlur={() => handleBlur('description')}
-          className={`w-full ${fieldClass('description')}`} />
-        {errors.description && <p className="text-xs text-red-600 mt-0.5">{errors.description}</p>}
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        {meta && (
-          <input placeholder={`${meta.capacityLabel} (${meta.capacityUnit}) — optional`} type="number" value={form.capacity}
-            onChange={e => updateField('capacity', e.target.value)}
-            className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
-        )}
-        <input placeholder="Weight (kg) — optional" type="number" value={form.unit_weight_kg}
-          onChange={e => updateField('unit_weight_kg', e.target.value)}
-          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
-      </div>
-      <div>
-        <label className="block text-xs text-gray-500 mb-1">VAT status</label>
-        <select value={form.vat_status} onChange={e => updateField('vat_status', e.target.value)}
-          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white outline-none focus:border-blue-400">
-          {VAT_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        {specFields.map(s => (
-          <input key={s.key} placeholder={`${s.label} — optional`} type={s.text ? 'text' : 'number'} value={form[s.key]}
-            onChange={e => updateField(s.key, e.target.value)}
-            className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-blue-400" />
-        ))}
-      </div>
-
-      {isEdit && (
-        <div className="pt-2 border-t border-gray-100 space-y-2">
-          <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Stock & Supply</div>
-          <div className="flex gap-2 items-center flex-wrap">
-            <input placeholder="Stock qty" type="number" value={form.stock_qty}
-              onChange={e => updateField('stock_qty', e.target.value)}
-              className="w-28 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
-            <span className="text-xs text-gray-400">reorder at</span>
-            <input placeholder="—" type="number" value={form.reorder_point}
-              onChange={e => updateField('reorder_point', e.target.value)}
-              className="w-24 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
-            <label className="flex items-center gap-1.5 text-sm text-gray-600 ml-auto">
-              <input type="checkbox" checked={form.in_stock} onChange={e => updateField('in_stock', e.target.checked)} className="w-4 h-4" />
-              In stock (orderable)
-            </label>
-          </div>
-          <input placeholder="Supplier name" value={form.supplier}
-            onChange={e => updateField('supplier', e.target.value)}
-            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
-          <input placeholder="Reason for quantity change (optional)" value={form.reason}
-            onChange={e => updateField('reason', e.target.value)}
-            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
-        </div>
-      )}
-
-      <p className="text-xs text-blue-600">Fields marked * are required. Leave any spec blank if you don't know it yet — it just won't show in the customer comparison.</p>
-      {submitError && <p className="text-xs text-red-600 font-semibold bg-red-50 p-2 rounded-lg">{submitError}</p>}
-      <div className="flex gap-2">
-        <button onClick={save} disabled={saving}
-          className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition disabled:opacity-50">
-          {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Add Product'}
-        </button>
-        {onCancel && <button onClick={onCancel} className="text-xs text-gray-400 hover:text-gray-600 px-2">Cancel</button>}
-      </div>
-    </div>
-  )
-}
+// ItemForm now lives in its own file — src/pages/ItemForm.tsx — as
+// RhiPower's first TypeScript + Zod component (extracted here since it
+// was already being rebuilt with a much larger spec-field set; Zod
+// validates the data before it reaches Supabase, which matters more here
+// than almost anywhere else since there's no human code reviewer).
 
 // Stock movement ledger — fetched on demand per item, not preloaded for
 // every row, since it's a "why did this change" lookup, not a primary view.
@@ -569,6 +353,10 @@ const ROLE_KEY_COLUMN = { panel: 'panel_role_key', inverter: 'inverter_role_key'
 // results depending on which one was used last.
 function ItemDetailModal({ row, category, onClose, onChanged, onCloneRequested, session }) {
   const meta = CATEGORY_META[category]
+  // Same productSpecRows() the customer-facing product detail page uses —
+  // a single source of truth so the admin's own view of an item's specs
+  // never drifts from what a customer actually sees.
+  const specs = meta ? productSpecRows(category, toProduct(row)) : []
   const [tab, setTab] = useState('overview')
   const [transactions, setTransactions] = useState(null)
   const [loadingTx, setLoadingTx] = useState(false)
@@ -662,6 +450,16 @@ function ItemDetailModal({ row, category, onClose, onChanged, onCloneRequested, 
               <div className="flex justify-between"><span className="text-gray-400">Supplier</span><span className="font-bold">{row.supplier || '—'}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">VAT status</span><span className="font-bold">{VAT_STATUS_OPTIONS.find(o => o.value === (row.vat_status || 'standard'))?.label}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Status</span><span className="font-bold">{row.is_active === false ? 'Inactive' : 'Active'}{row.in_stock === false ? ' · Marked out of stock' : ''}</span></div>
+              {specs.length > 0 && (
+                <div className="pt-3 mt-1 border-t border-gray-100">
+                  <div className="text-xs font-bold uppercase text-gray-400 tracking-wider mb-1.5">Specifications</div>
+                  <div className="space-y-1.5">
+                    {specs.map(([k, v]) => (
+                      <div key={k} className="flex justify-between"><span className="text-gray-400">{k}</span><span className="font-bold">{v}</span></div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
           {tab === 'transactions' && (
