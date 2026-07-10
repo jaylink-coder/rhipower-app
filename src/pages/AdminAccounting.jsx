@@ -270,12 +270,16 @@ function OpeningBalancesTab({ session }) {
   const [cutoverDate, setCutoverDate] = useState(new Date().toISOString().slice(0, 10))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [loadError, setLoadError] = useState('')
   const [done, setDone] = useState(false)
 
   useEffect(() => {
     Promise.all([hasOpeningBalancesBeenPosted(), computeSuggestedInventoryAsset(), computeSuggestedAccountsReceivable()])
       .then(([posted, inv, ar]) => { setStatus({ posted }); setSuggestedInventory(inv); setSuggestedAR(ar) })
+      .catch(e => setLoadError(e.message || String(e)))
   }, [])
+
+  if (loadError) return <div className="bg-red-50 border border-red-200 rounded-2xl p-5 text-sm text-red-800 font-mono">{loadError}</div>
 
   const debitTotal  = suggestedInventory + suggestedAR + OPENING_DEBIT_FIELDS.reduce((s, f) => s + (parseFloat(form[f.key]) || 0), 0)
   const creditTotal = OPENING_CREDIT_FIELDS.reduce((s, f) => s + (parseFloat(form[f.key]) || 0), 0)
@@ -494,13 +498,20 @@ function JournalEntryRow({ entry, session, onReversed }) {
 function JournalTab({ accounts, session }) {
   const [entries, setEntries] = useState(null)
   const [adding, setAdding] = useState(false)
+  const [loadError, setLoadError] = useState('')
 
   async function load() {
-    const rows = await fetchJournalEntries({ limit: 100 })
-    setEntries(rows)
+    setLoadError('')
+    try {
+      const rows = await fetchJournalEntries({ limit: 100 })
+      setEntries(rows)
+    } catch (e) {
+      setLoadError(e.message || String(e))
+    }
   }
   useEffect(() => { load() }, [])
 
+  if (loadError) return <div className="bg-red-50 border border-red-200 rounded-2xl p-5 text-sm text-red-800 font-mono">{loadError}</div>
   if (entries === null) return <div className="text-gray-400 text-sm py-10 text-center">Loading journal…</div>
 
   return (
@@ -535,9 +546,12 @@ function BankReconciliationTab({ session }) {
   const [statementBalance, setStatementBalance] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
-    fetchBankAccounts().then(rows => { setAccounts(rows); if (rows[0]) setSelectedId(rows[0].id) })
+    fetchBankAccounts()
+      .then(rows => { setAccounts(rows); if (rows[0]) setSelectedId(rows[0].id) })
+      .catch(e => setLoadError(e.message || String(e)))
   }, [])
 
   const account = accounts?.find(a => a.id === selectedId)
@@ -547,10 +561,14 @@ function BankReconciliationTab({ session }) {
   const loadForAccount = useCallback(async (id) => {
     const acc = (accounts || []).find(a => a.id === id)
     if (!acc) return
-    const [recons, unclearedLines] = await Promise.all([fetchReconciliations(id), fetchUnclearedLines(acc)])
-    setReconciliations(recons)
-    setLines(unclearedLines)
-    setClearedIds(new Set())
+    try {
+      const [recons, unclearedLines] = await Promise.all([fetchReconciliations(id), fetchUnclearedLines(acc)])
+      setReconciliations(recons)
+      setLines(unclearedLines)
+      setClearedIds(new Set())
+    } catch (e) {
+      setLoadError(e.message || String(e))
+    }
   }, [accounts])
   useEffect(() => { if (accounts && selectedId) loadForAccount(selectedId) }, [accounts, selectedId, loadForAccount])
 
@@ -595,6 +613,7 @@ function BankReconciliationTab({ session }) {
     setBusy(false)
   }
 
+  if (loadError) return <div className="bg-red-50 border border-red-200 rounded-2xl p-5 text-sm text-red-800 font-mono">{loadError}</div>
   if (accounts === null) return <div className="text-gray-400 text-sm py-10 text-center">Loading…</div>
 
   const relevantLines = lines.filter(l => !activeRecon || l.journal_entries.entry_date <= activeRecon.statement_date)
@@ -681,9 +700,11 @@ function BankReconciliationTab({ session }) {
 function TrialBalanceTab() {
   const [asOfDate, setAsOfDate] = useState(new Date().toISOString().slice(0, 10))
   const [report, setReport] = useState(null)
+  const [loadError, setLoadError] = useState('')
 
-  useEffect(() => { getTrialBalance({ asOfDate }).then(setReport) }, [asOfDate])
+  useEffect(() => { setLoadError(''); getTrialBalance({ asOfDate }).then(setReport).catch(e => setLoadError(e.message || String(e))) }, [asOfDate])
 
+  if (loadError) return <div className="bg-red-50 border border-red-200 rounded-2xl p-5 text-sm text-red-800 font-mono">{loadError}</div>
   if (!report) return <div className="text-gray-400 text-sm py-10 text-center">Loading…</div>
 
   function exportCsv() {
@@ -763,10 +784,12 @@ function ProfitAndLossTab() {
   const [customFrom, setCustomFrom] = useState(new Date().toISOString().slice(0, 10))
   const [customTo, setCustomTo] = useState(new Date().toISOString().slice(0, 10))
   const [report, setReport] = useState(null)
+  const [loadError, setLoadError] = useState('')
   const { from, to } = rangeBounds(rangeId, customFrom, customTo)
 
-  useEffect(() => { getProfitAndLoss({ from, to }).then(setReport) }, [from, to])
+  useEffect(() => { setLoadError(''); getProfitAndLoss({ from, to }).then(setReport).catch(e => setLoadError(e.message || String(e))) }, [from, to])
 
+  if (loadError) return <div className="bg-red-50 border border-red-200 rounded-2xl p-5 text-sm text-red-800 font-mono">{loadError}</div>
   if (!report) return <div className="text-gray-400 text-sm py-10 text-center">Loading…</div>
 
   function exportCsv() {
@@ -806,9 +829,11 @@ function ProfitAndLossTab() {
 function BalanceSheetTab() {
   const [asOfDate, setAsOfDate] = useState(new Date().toISOString().slice(0, 10))
   const [report, setReport] = useState(null)
+  const [loadError, setLoadError] = useState('')
 
-  useEffect(() => { getBalanceSheet({ asOfDate }).then(setReport) }, [asOfDate])
+  useEffect(() => { setLoadError(''); getBalanceSheet({ asOfDate }).then(setReport).catch(e => setLoadError(e.message || String(e))) }, [asOfDate])
 
+  if (loadError) return <div className="bg-red-50 border border-red-200 rounded-2xl p-5 text-sm text-red-800 font-mono">{loadError}</div>
   if (!report) return <div className="text-gray-400 text-sm py-10 text-center">Loading…</div>
 
   function exportCsv() {
@@ -888,12 +913,17 @@ function VatReportTab() {
   const [customTo, setCustomTo] = useState(new Date().toISOString().slice(0, 10))
   const [report, setReport] = useState(null)
   const [breakdown, setBreakdown] = useState(null)
+  const [loadError, setLoadError] = useState('')
   const { from, to } = rangeBounds(rangeId, customFrom, customTo)
 
   useEffect(() => {
-    Promise.all([getVatReport({ from, to }), fetchVatBreakdown({ from, to })]).then(([r, b]) => { setReport(r); setBreakdown(b) })
+    setLoadError('')
+    Promise.all([getVatReport({ from, to }), fetchVatBreakdown({ from, to })])
+      .then(([r, b]) => { setReport(r); setBreakdown(b) })
+      .catch(e => setLoadError(e.message || String(e)))
   }, [from, to])
 
+  if (loadError) return <div className="bg-red-50 border border-red-200 rounded-2xl p-5 text-sm text-red-800 font-mono">{loadError}</div>
   if (!report || !breakdown) return <div className="text-gray-400 text-sm py-10 text-center">Loading…</div>
 
   function exportCsv() {
@@ -965,19 +995,24 @@ function BudgetVsActualTab({ session }) {
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState({})
   const [saving, setSaving] = useState({})
+  const [loadError, setLoadError] = useState('')
 
   const load = useCallback(async () => {
-    setLoading(true)
-    const [year, month] = periodMonth.split('-').map(Number)
-    const monthEnd = new Date(year, month, 0).toISOString().slice(0, 10)
-    const [accs, budgetRows, pl] = await Promise.all([
-      fetchChartOfAccounts({ forceRefresh: true }),
-      fetchBudgets(periodMonth),
-      getProfitAndLoss({ from: periodMonth, to: monthEnd }),
-    ])
-    setAccounts(accs.filter(a => (a.account_type === 'income' || a.account_type === 'expense') && a.is_active !== false))
-    setBudgets(budgetRows)
-    setPlReport(pl)
+    setLoading(true); setLoadError('')
+    try {
+      const [year, month] = periodMonth.split('-').map(Number)
+      const monthEnd = new Date(year, month, 0).toISOString().slice(0, 10)
+      const [accs, budgetRows, pl] = await Promise.all([
+        fetchChartOfAccounts({ forceRefresh: true }),
+        fetchBudgets(periodMonth),
+        getProfitAndLoss({ from: periodMonth, to: monthEnd }),
+      ])
+      setAccounts(accs.filter(a => (a.account_type === 'income' || a.account_type === 'expense') && a.is_active !== false))
+      setBudgets(budgetRows)
+      setPlReport(pl)
+    } catch (e) {
+      setLoadError(e.message || String(e))
+    }
     setLoading(false)
   }, [periodMonth])
   useEffect(() => { load() }, [load])
@@ -999,6 +1034,7 @@ function BudgetVsActualTab({ session }) {
     setSaving(p => ({ ...p, [accountId]: false }))
   }
 
+  if (loadError) return <div className="bg-red-50 border border-red-200 rounded-2xl p-5 text-sm text-red-800 font-mono">{loadError}</div>
   if (loading) return <div className="text-gray-400 text-sm py-10 text-center">Loading…</div>
 
   const totalBudgeted = accounts.reduce((s, a) => s + budgetFor(a.id), 0)
@@ -1068,13 +1104,28 @@ function BudgetVsActualTab({ session }) {
 export default function AdminAccounting({ session }) {
   const [section, setSection] = useState('coa')
   const [accounts, setAccounts] = useState(null)
+  const [loadError, setLoadError] = useState('')
 
   async function loadAccounts() {
-    const rows = await fetchChartOfAccounts({ forceRefresh: true })
-    setAccounts(rows)
+    setLoadError('')
+    try {
+      const rows = await fetchChartOfAccounts({ forceRefresh: true })
+      setAccounts(rows)
+    } catch (e) {
+      setLoadError(e.message || String(e))
+    }
   }
   useEffect(() => { loadAccounts() }, [])
 
+  if (loadError) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-2xl p-5 text-sm text-red-800 space-y-2">
+        <div className="font-bold">Couldn't load the Chart of Accounts.</div>
+        <div className="font-mono text-xs">{loadError}</div>
+        <button onClick={loadAccounts} className="text-xs font-bold text-red-700 hover:text-red-900 underline">Retry</button>
+      </div>
+    )
+  }
   if (accounts === null) return <div className="text-gray-400 text-sm py-10 text-center">Loading accounting…</div>
 
   return (
