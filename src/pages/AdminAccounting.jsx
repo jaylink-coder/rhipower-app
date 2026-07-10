@@ -794,11 +794,14 @@ function ProfitAndLossTab() {
 
   function exportCsv() {
     downloadCSV([
-      ...report.income.map(r => ({ Section: 'Income', Account: r.account.name, Amount: r.amount })),
-      { Section: '', Account: 'Total Income', Amount: report.totalIncome },
+      ...report.income.map(r => ({ Section: 'Revenue', Account: r.account.name, Amount: r.amount })),
+      { Section: '', Account: 'Total Revenue', Amount: report.totalIncome },
       ...report.cogs.map(r => ({ Section: 'COGS', Account: r.account.name, Amount: r.amount })),
       { Section: '', Account: 'Gross Profit', Amount: report.grossProfit },
       ...report.opex.map(r => ({ Section: 'Operating Expense', Account: r.account.name, Amount: r.amount })),
+      { Section: '', Account: 'Operating Income', Amount: report.operatingIncome },
+      ...report.otherIncome.map(r => ({ Section: 'Other Income', Account: r.account.name, Amount: r.amount })),
+      ...report.otherExpense.map(r => ({ Section: 'Other Expense', Account: r.account.name, Amount: r.amount })),
       { Section: '', Account: 'Net Profit', Amount: report.netProfit },
     ], `rhipower-profit-and-loss-${from || 'inception'}-to-${to}.csv`)
   }
@@ -809,14 +812,27 @@ function ProfitAndLossTab() {
         <RangePicker rangeId={rangeId} setRangeId={setRangeId} customFrom={customFrom} setCustomFrom={setCustomFrom} customTo={customTo} setCustomTo={setCustomTo} />
         <button onClick={exportCsv} className="ml-auto text-xs font-bold text-blue-600 hover:text-blue-800">⬇ Export CSV</button>
       </div>
+      <p className="text-xs text-gray-400">Multi-step format — operating results (the repeatable core business) are separated from one-off, non-operating items, so a single asset sale or write-off doesn't get mixed in with recurring costs.</p>
 
-      <StatementSection title="Income" rows={report.income} total={report.totalIncome} totalLabel="Total Income" />
+      <StatementSection title="Revenue" rows={report.income} total={report.totalIncome} totalLabel="Total Revenue" />
       <StatementSection title="Cost of Goods Sold" rows={report.cogs} total={report.totalCogs} totalLabel="Total COGS" />
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex justify-between items-center">
         <span className="text-sm font-bold text-blue-800">Gross Profit</span>
         <span className="font-mono font-black text-blue-800">{formatKsh(report.grossProfit)}</span>
       </div>
       <StatementSection title="Operating Expenses" rows={report.opex} total={report.totalOpex} totalLabel="Total Operating Expenses" />
+      <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 flex justify-between items-center">
+        <span className="text-sm font-bold text-indigo-800">Operating Income</span>
+        <span className="font-mono font-black text-indigo-800">{formatKsh(report.operatingIncome)}</span>
+      </div>
+
+      {(report.otherIncome.length > 0 || report.otherExpense.length > 0) && (
+        <>
+          <StatementSection title="Other Income (Non-Operating)" rows={report.otherIncome} total={report.totalOtherIncome} totalLabel="Total Other Income" />
+          <StatementSection title="Other Expense (Non-Operating)" rows={report.otherExpense} total={report.totalOtherExpense} totalLabel="Total Other Expense" />
+        </>
+      )}
+
       <div className={`border rounded-xl p-4 flex justify-between items-center ${report.netProfit >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
         <span className={`text-sm font-black ${report.netProfit >= 0 ? 'text-green-800' : 'text-red-800'}`}>Net Profit</span>
         <span className={`font-mono font-black text-lg ${report.netProfit >= 0 ? 'text-green-800' : 'text-red-800'}`}>{formatKsh(report.netProfit)}</span>
@@ -1018,7 +1034,10 @@ function BudgetVsActualTab({ session }) {
   useEffect(() => { load() }, [load])
 
   function actualFor(accountId) {
-    const all = [...(plReport?.income || []), ...(plReport?.cogs || []), ...(plReport?.opex || [])]
+    const all = [
+      ...(plReport?.income || []), ...(plReport?.otherIncome || []),
+      ...(plReport?.cogs || []), ...(plReport?.opex || []), ...(plReport?.otherExpense || []),
+    ]
     return all.find(r => r.account.id === accountId)?.amount || 0
   }
   function budgetFor(accountId) {

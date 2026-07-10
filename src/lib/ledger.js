@@ -273,6 +273,14 @@ export async function getTrialBalance({ asOfDate } = {}) {
   return { rows, totalDebit, totalCredit, balanced: totalDebit === totalCredit }
 }
 
+// Multi-step income statement — Revenue, COGS, Gross Profit, Operating
+// Expenses, Operating Income, then a separate Non-Operating (Other)
+// Income/Expense section, then Net Profit. Standard practice for anyone
+// evaluating the business seriously (investors, lenders) rather than a
+// flat single-step P&L that dumps a one-off asset-disposal loss in among
+// recurring rent/fuel/utilities as if it were an ordinary operating cost.
+// Requires migration 028 (adds the 'other_income' subtype, mirroring the
+// 'other_expense' subtype that already existed for expenses).
 export async function getProfitAndLoss({ from, to } = {}) {
   const accounts = await loadAccounts()
   const byAccount = aggregateByAccount(await fetchPostedLines({ from, to }))
@@ -280,17 +288,26 @@ export async function getProfitAndLoss({ from, to } = {}) {
     .map(a => ({ account: a, amount: normalBalanceAmount(byAccount, a) }))
     .filter(r => r.amount !== 0)
 
-  const income = rowsFor(a => a.account_type === 'income')
-  const cogs   = rowsFor(a => a.account_subtype === 'cogs')
-  const opex   = rowsFor(a => a.account_type === 'expense' && a.account_subtype !== 'cogs')
+  const income       = rowsFor(a => a.account_type === 'income' && a.account_subtype === 'income')
+  const cogs         = rowsFor(a => a.account_subtype === 'cogs')
+  const opex         = rowsFor(a => a.account_subtype === 'operating_expense')
+  const otherIncome  = rowsFor(a => a.account_subtype === 'other_income')
+  const otherExpense = rowsFor(a => a.account_subtype === 'other_expense')
 
-  const totalIncome = ROUND(income.reduce((s, r) => s + r.amount, 0))
-  const totalCogs   = ROUND(cogs.reduce((s, r) => s + r.amount, 0))
-  const grossProfit = ROUND(totalIncome - totalCogs)
-  const totalOpex   = ROUND(opex.reduce((s, r) => s + r.amount, 0))
-  const netProfit   = ROUND(grossProfit - totalOpex)
+  const totalIncome      = ROUND(income.reduce((s, r) => s + r.amount, 0))
+  const totalCogs        = ROUND(cogs.reduce((s, r) => s + r.amount, 0))
+  const grossProfit      = ROUND(totalIncome - totalCogs)
+  const totalOpex        = ROUND(opex.reduce((s, r) => s + r.amount, 0))
+  const operatingIncome  = ROUND(grossProfit - totalOpex)
+  const totalOtherIncome = ROUND(otherIncome.reduce((s, r) => s + r.amount, 0))
+  const totalOtherExpense= ROUND(otherExpense.reduce((s, r) => s + r.amount, 0))
+  const netProfit         = ROUND(operatingIncome + totalOtherIncome - totalOtherExpense)
 
-  return { income, cogs, opex, totalIncome, totalCogs, grossProfit, totalOpex, netProfit }
+  return {
+    income, cogs, opex, otherIncome, otherExpense,
+    totalIncome, totalCogs, grossProfit, totalOpex, operatingIncome,
+    totalOtherIncome, totalOtherExpense, netProfit,
+  }
 }
 
 // Includes a live "Current Earnings" equity line — P&L net profit from
@@ -344,7 +361,7 @@ export async function getMonthlyTrend({ months = 12 } = {}) {
   const buckets = new Map()
   for (let i = 0; i < months; i++) {
     const d = new Date(startMonth.getFullYear(), startMonth.getMonth() + i, 1)
-    buckets.set(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, { income: 0, cogs: 0, opex: 0 })
+    buckets.set(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, { income: 0, cogs: 0, opex: 0, otherIncome: 0, otherExpense: 0 })
   }
 
   lines.forEach(l => {
@@ -355,14 +372,20 @@ export async function getMonthlyTrend({ months = 12 } = {}) {
     const amt = account.normal_balance === 'credit'
       ? Number(l.credit_kes) - Number(l.debit_kes)
       : Number(l.debit_kes) - Number(l.credit_kes)
-    if (account.account_type === 'income') bucket.income += amt
+    if (account.account_subtype === 'income') bucket.income += amt
+    else if (account.account_subtype === 'other_income') bucket.otherIncome += amt
     else if (account.account_subtype === 'cogs') bucket.cogs += amt
-    else if (account.account_type === 'expense') bucket.opex += amt
+    else if (account.account_subtype === 'operating_expense') bucket.opex += amt
+    else if (account.account_subtype === 'other_expense') bucket.otherExpense += amt
   })
 
+  // "revenue" = operating revenue only (materials/labour/logistics), so it
+  // reads as the true top line — netProfit stays the fully-inclusive
+  // bottom line, same total either way, just broken down more precisely.
   return Array.from(buckets.entries()).map(([month, b]) => {
     const revenue = ROUND(b.income), cogs = ROUND(b.cogs), opex = ROUND(b.opex)
     const grossProfit = ROUND(revenue - cogs)
-    return { month, revenue, cogs, grossProfit, opex, netProfit: ROUND(grossProfit - opex) }
+    const operatingIncome = ROUND(grossProfit - opex)
+    return { month, revenue, cogs, grossProfit, opex, netProfit: ROUND(operatingIncome + b.otherIncome - b.otherExpense) }
   })
 }
