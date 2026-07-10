@@ -487,6 +487,8 @@ const ROLE_KEY_COLUMN = { panel: 'panel_role_key', inverter: 'inverter_role_key'
 // Clone / Mark Active-Inactive / Delete. Layered on top of the existing
 // inline table editing rather than replacing it, since that already works.
 function ItemDetailModal({ row, category, onClose, onChanged, onCloneRequested, session }) {
+  const meta = CATEGORY_META[category]
+  const specFields = SPEC_FIELDS[category] || []
   const [tab, setTab] = useState('overview')
   const [transactions, setTransactions] = useState(null)
   const [loadingTx, setLoadingTx] = useState(false)
@@ -494,6 +496,59 @@ function ItemDetailModal({ row, category, onClose, onChanged, onCloneRequested, 
   const [loadingHist, setLoadingHist] = useState(false)
   const [busy, setBusy] = useState(false)
   const [deleteBlocked, setDeleteBlocked] = useState(null)
+
+  // Editing SKU/description/specs — separate from the inline price/stock
+  // editors already on the table row, since those cover different fields.
+  // Previously there was NO way to fix a typo in the customer-facing
+  // description or brand/model name after creation short of delete +
+  // recreate (often blocked once there's any history) — a real gap for
+  // text customers actually see.
+  const [editingDetails, setEditingDetails] = useState(false)
+  const [form, setForm] = useState(null)
+  const [errors, setErrors] = useState({})
+  const [submitError, setSubmitError] = useState('')
+
+  function startEditDetails() {
+    const f = {
+      sku: row.sku || '', description: row.description || '',
+      capacity: meta && row[meta.capacityField] != null ? String(row[meta.capacityField]) : '',
+      unit_weight_kg: row.unit_weight_kg != null ? String(row.unit_weight_kg) : '',
+      vat_status: row.vat_status || 'standard',
+    }
+    specFields.forEach(s => { f[s.key] = row[s.key] != null ? String(row[s.key]) : '' })
+    setForm(f)
+    setErrors({}); setSubmitError('')
+    setEditingDetails(true)
+  }
+
+  function validateDetailField(key, value) {
+    if (key === 'sku' && !value.trim()) return 'Brand/model is required.'
+    if (key === 'description' && !value.trim()) return 'Description is required.'
+    return null
+  }
+  function updateDetailField(key, value) {
+    setForm(f => ({ ...f, [key]: value }))
+    if (errors[key]) setErrors(e => ({ ...e, [key]: null }))
+  }
+
+  async function saveDetails() {
+    const nextErrors = {}
+    ;['sku', 'description'].forEach(key => { const msg = validateDetailField(key, form[key]); if (msg) nextErrors[key] = msg })
+    if (Object.keys(nextErrors).length > 0) { setErrors(nextErrors); return }
+
+    setBusy(true); setSubmitError('')
+    const payload = { sku: form.sku.trim(), description: form.description.trim(), vat_status: form.vat_status || 'standard', updated_at: new Date().toISOString() }
+    if (meta) payload[meta.capacityField] = form.capacity === '' ? null : parseFloat(form.capacity)
+    payload.unit_weight_kg = form.unit_weight_kg === '' ? null : parseFloat(form.unit_weight_kg)
+    specFields.forEach(s => { payload[s.key] = form[s.key] === '' ? null : (s.text ? form[s.key] : parseFloat(form[s.key])) })
+
+    const { data, error } = await supabase.from('inventory_prices').update(payload).eq('role_key', row.role_key).select().single()
+    setBusy(false)
+    if (error) { setSubmitError(error.message); return }
+    onChanged(data)
+    logAdminAction(session, 'item_details_updated', row.role_key, { sku: data.sku })
+    setEditingDetails(false)
+  }
 
   useEffect(() => {
     if (tab === 'transactions' && transactions === null) {
@@ -567,14 +622,66 @@ function ItemDetailModal({ row, category, onClose, onChanged, onCloneRequested, 
         </div>
 
         <div className="p-5">
-          {tab === 'overview' && (
+          {tab === 'overview' && !editingDetails && (
             <div className="space-y-2 text-sm">
+              <div className="flex justify-between"><span className="text-gray-400">Brand / model</span><span className="font-bold">{row.sku}</span></div>
+              <div className="flex justify-between"><span className="text-gray-400">Description</span><span className="font-bold text-right max-w-xs">{row.description}</span></div>
+              {meta && <div className="flex justify-between"><span className="text-gray-400">{meta.capacityLabel}</span><span className="font-bold">{row[meta.capacityField] != null ? `${row[meta.capacityField]}${meta.capacityUnit}` : '—'}</span></div>}
+              <div className="flex justify-between"><span className="text-gray-400">Weight</span><span className="font-bold">{row.unit_weight_kg != null ? `${row.unit_weight_kg} kg` : '—'}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Buying price</span><span className="font-bold">{formatKsh(row.buying_price_kes)}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Selling price</span><span className="font-bold text-emerald-700">{formatKsh(row.buying_price_kes * 1.35)}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Stock on hand</span><span className="font-bold">{row.stock_qty ?? 'Not tracked'}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Supplier</span><span className="font-bold">{row.supplier || '—'}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">VAT status</span><span className="font-bold">{VAT_STATUS_OPTIONS.find(o => o.value === (row.vat_status || 'standard'))?.label}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Status</span><span className="font-bold">{row.is_active === false ? 'Inactive' : 'Active'}{row.in_stock === false ? ' · Marked out of stock' : ''}</span></div>
+              <button onClick={startEditDetails} className="mt-3 text-xs font-bold text-blue-600 hover:text-blue-800">✏️ Edit Brand/Model, Description & Specs</button>
+            </div>
+          )}
+          {tab === 'overview' && editingDetails && (
+            <div className="space-y-2.5 text-sm">
+              <div>
+                <input placeholder="Brand / model *" value={form.sku} onChange={e => updateDetailField('sku', e.target.value)}
+                  className={`w-full border rounded-lg px-2 py-1.5 text-sm outline-none ${errors.sku ? 'border-red-400' : 'border-gray-200 focus:border-blue-400'}`} />
+                {errors.sku && <p className="text-xs text-red-600 mt-0.5">{errors.sku}</p>}
+              </div>
+              <div>
+                <input placeholder="Description (shown to customers) *" value={form.description} onChange={e => updateDetailField('description', e.target.value)}
+                  className={`w-full border rounded-lg px-2 py-1.5 text-sm outline-none ${errors.description ? 'border-red-400' : 'border-gray-200 focus:border-blue-400'}`} />
+                {errors.description && <p className="text-xs text-red-600 mt-0.5">{errors.description}</p>}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {meta && (
+                  <input placeholder={`${meta.capacityLabel} (${meta.capacityUnit})`} type="number" value={form.capacity}
+                    onChange={e => updateDetailField('capacity', e.target.value)}
+                    className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
+                )}
+                <input placeholder="Weight (kg)" type="number" value={form.unit_weight_kg}
+                  onChange={e => updateDetailField('unit_weight_kg', e.target.value)}
+                  className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">VAT status</label>
+                <select value={form.vat_status} onChange={e => updateDetailField('vat_status', e.target.value)}
+                  className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white outline-none focus:border-blue-400">
+                  {VAT_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+              {specFields.length > 0 && (
+                <div className="grid grid-cols-3 gap-2">
+                  {specFields.map(s => (
+                    <input key={s.key} placeholder={s.label} type={s.text ? 'text' : 'number'} value={form[s.key]}
+                      onChange={e => updateDetailField(s.key, e.target.value)}
+                      className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-blue-400" />
+                  ))}
+                </div>
+              )}
+              {submitError && <p className="text-xs text-red-600 font-semibold bg-red-50 p-2 rounded-lg">{submitError}</p>}
+              <div className="flex gap-2 pt-1">
+                <button onClick={saveDetails} disabled={busy} className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition disabled:opacity-50">
+                  {busy ? 'Saving…' : 'Save Changes'}
+                </button>
+                <button onClick={() => setEditingDetails(false)} className="text-xs text-gray-400 hover:text-gray-600 px-2">Cancel</button>
+              </div>
             </div>
           )}
           {tab === 'transactions' && (
@@ -1010,6 +1117,11 @@ function InventoryTable({ session, invSection }) {
               setRows(p => { const n = { ...p }; delete n[viewingItem.row.role_key]; return n })
             } else {
               setRows(p => ({ ...p, [updatedRow.role_key]: updatedRow }))
+              // Keep the open modal's own row in sync too — it's a snapshot
+              // captured at open time, not reactively derived from `rows`,
+              // so without this a save would look like it did nothing until
+              // the modal was closed and reopened.
+              setViewingItem(v => v && v.row.role_key === updatedRow.role_key ? { ...v, row: updatedRow } : v)
             }
           }}
           onCloneRequested={sourceRow => {
