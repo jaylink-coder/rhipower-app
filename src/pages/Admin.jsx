@@ -344,8 +344,7 @@ function ItemForm({ category, mode, editRow, cloneFrom, onSaved, onCancel, sessi
   const fieldClass = key => `border rounded-lg px-2 py-1.5 text-sm outline-none ${errors[key] ? 'border-red-400 focus:border-red-500' : 'border-gray-200 focus:border-blue-400'}`
 
   return (
-    <div className="p-4 bg-blue-50 border-b border-blue-100 space-y-2">
-      {isEdit && <div className="text-xs font-black text-blue-800 uppercase tracking-wider">Editing: {editRow.description}</div>}
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-3">
       <div className="grid grid-cols-2 gap-2">
         <div>
           <input placeholder="Brand / model (e.g. JA Solar 700W N-Type) *" value={form.sku}
@@ -392,7 +391,7 @@ function ItemForm({ category, mode, editRow, cloneFrom, onSaved, onCancel, sessi
       </div>
 
       {isEdit && (
-        <div className="pt-2 border-t border-blue-100 space-y-2">
+        <div className="pt-2 border-t border-gray-100 space-y-2">
           <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Stock & Supply</div>
           <div className="flex gap-2 items-center flex-wrap">
             <input placeholder="Stock qty" type="number" value={form.stock_qty}
@@ -794,6 +793,25 @@ function InventoryTable({ session, invSection }) {
     .map(item => ({ item, row: rows[item.key] }))
     .filter(({ row }) => row?.stock_qty != null && row?.reorder_point != null && row.stock_qty <= row.reorder_point)
 
+  // Add/Edit is a full page, not an inline panel in the list — this is
+  // the only "Edit" entry point in the app (see ItemForm's comment), and
+  // giving it its own page keeps a long form from cramping the table view
+  // it was previously squeezed into.
+  if (formState) {
+    return (
+      <div className="max-w-3xl mx-auto space-y-4">
+        <button onClick={() => setFormState(null)} className="text-xs font-bold text-gray-400 hover:text-gray-600">← Back to Inventory</button>
+        <h2 className="text-lg font-black text-gray-800">
+          {formState.mode === 'edit' ? `Edit Item: ${formState.editRow.description}` : 'Add New Item'}
+        </h2>
+        <ItemForm category={formState.category} mode={formState.mode} session={session}
+          editRow={formState.editRow} cloneFrom={formState.cloneFrom}
+          onCancel={() => setFormState(null)}
+          onSaved={row => { setRows(p => ({ ...p, [row.role_key]: row })); setFormState(null) }} />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-4">
       {lowStockItems.length > 0 && (
@@ -816,21 +834,12 @@ function InventoryTable({ session, invSection }) {
           <div className="bg-gray-50 border-b border-gray-100 px-5 py-3 flex items-center justify-between">
             <h3 className="font-black text-gray-700 text-sm">{group.title}</h3>
             {group.category && (
-              <button onClick={() => setFormState(f => f?.category === group.category && f.mode === 'add' ? null : { category: group.category, mode: 'add' })}
+              <button onClick={() => setFormState({ category: group.category, mode: 'add' })}
                 className="text-xs font-bold text-blue-600 hover:text-blue-800">
-                {formState?.category === group.category && formState.mode === 'add' ? '✕ Cancel' : '+ Add Item'}
+                + Add Item
               </button>
             )}
           </div>
-          {formState && (
-            (formState.mode === 'add' && formState.category === group.category) ||
-            (formState.mode === 'edit' && group.items.some(i => i.key === formState.editRow.role_key))
-          ) && (
-            <ItemForm category={formState.category} mode={formState.mode} session={session}
-              editRow={formState.editRow} cloneFrom={formState.cloneFrom}
-              onCancel={() => setFormState(null)}
-              onSaved={row => { setRows(p => ({ ...p, [row.role_key]: row })); setFormState(null) }} />
-          )}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
