@@ -226,19 +226,41 @@ function PriceBandsPanel({ priceBands, session, onChange }) {
 }
 
 // New-product form — any number of products per category, tier derived from price.
-function AddItemForm({ category, onAdded, session, cloneFrom }) {
-  const meta = CATEGORY_META[category]
-  const specFields = SPEC_FIELDS[category]
+// One form, two modes — this is the ONLY place any item field gets
+// edited anywhere in the app. 'add' inserts a new item (optionally
+// prefilled from cloneFrom); 'edit' updates an existing one in place,
+// including stock levels, which used to have their own separate inline
+// editor on the table row. Two forms editing the same fields with two
+// different pieces of state was exactly the bug this replaced — one
+// piece of state, one save path, reached only via a single "Edit" button.
+function ItemForm({ category, mode, editRow, cloneFrom, onSaved, onCancel, session }) {
+  // BOM/Zone-component items (breakers, cable, mounting hardware, etc.)
+  // aren't in CATEGORY_META/SPEC_FIELDS — those only cover the three
+  // product categories (panel/inverter/battery) that have a capacity spec
+  // sheet. Edit mode has to work for both, so meta/capacity/specs are all
+  // optional here rather than assumed present.
+  const meta = CATEGORY_META[category] || null
+  const specFields = SPEC_FIELDS[category] || []
+  const isEdit = mode === 'edit'
+
   const blank = () => {
-    if (cloneFrom) {
+    const source = isEdit ? editRow : cloneFrom
+    if (source) {
       const f = {
-        sku: `${cloneFrom.sku} (copy)`, description: cloneFrom.description,
-        buying_price_kes: String(cloneFrom.buying_price_kes ?? ''),
-        unit_weight_kg: cloneFrom.unit_weight_kg != null ? String(cloneFrom.unit_weight_kg) : '',
-        capacity: cloneFrom[meta.capacityField] != null ? String(cloneFrom[meta.capacityField]) : '',
-        vat_status: cloneFrom.vat_status || 'standard',
+        sku: isEdit ? source.sku : `${source.sku} (copy)`, description: source.description,
+        buying_price_kes: String(source.buying_price_kes ?? ''),
+        unit_weight_kg: source.unit_weight_kg != null ? String(source.unit_weight_kg) : '',
+        capacity: meta && source[meta.capacityField] != null ? String(source[meta.capacityField]) : '',
+        vat_status: source.vat_status || 'standard',
       }
-      specFields.forEach(s => { f[s.key] = cloneFrom[s.key] != null ? String(cloneFrom[s.key]) : '' })
+      if (isEdit) {
+        f.stock_qty     = source.stock_qty     != null ? String(source.stock_qty)     : ''
+        f.reorder_point = source.reorder_point != null ? String(source.reorder_point) : ''
+        f.supplier      = source.supplier || ''
+        f.in_stock      = source.in_stock !== false
+        f.reason        = ''
+      }
+      specFields.forEach(s => { f[s.key] = source[s.key] != null ? String(source[s.key]) : '' })
       return f
     }
     const f = { sku: '', description: '', buying_price_kes: '', unit_weight_kg: '', capacity: '', vat_status: 'standard' }
@@ -252,7 +274,7 @@ function AddItemForm({ category, onAdded, session, cloneFrom }) {
 
   // Inline, on-blur validation — errors show immediately next to the field
   // that caused them rather than only surfacing (or worse, silently doing
-  // nothing) when Add Product is clicked.
+  // nothing) when the save button is clicked.
   function validateField(key, value) {
     if (key === 'sku' && !value.trim()) return 'Brand/model is required.'
     if (key === 'description' && !value.trim()) return 'Description is required.'
@@ -278,30 +300,52 @@ function AddItemForm({ category, onAdded, session, cloneFrom }) {
     if (Object.keys(nextErrors).length > 0) { setErrors(nextErrors); return }
 
     setSaving(true); setSubmitError('')
-    const roleKey = `${category}_${form.sku.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${Date.now().toString(36)}`
     const payload = {
-      role_key: roleKey, sku: form.sku.trim(), description: form.description.trim(),
-      category, tier: 'balanced', unit: 'each',
+      sku: form.sku.trim(), description: form.description.trim(),
       buying_price_kes: parseFloat(form.buying_price_kes),
       vat_status: form.vat_status || 'standard',
     }
-    if (form.unit_weight_kg) payload.unit_weight_kg = parseFloat(form.unit_weight_kg)
-    if (form.capacity) payload[meta.capacityField] = parseFloat(form.capacity)
-    specFields.forEach(s => { if (form[s.key] !== '') payload[s.key] = s.text ? form[s.key] : parseFloat(form[s.key]) })
+    payload.unit_weight_kg = form.unit_weight_kg === '' ? null : parseFloat(form.unit_weight_kg)
+    if (meta) payload[meta.capacityField] = form.capacity === '' ? null : parseFloat(form.capacity)
+    specFields.forEach(s => { payload[s.key] = form[s.key] === '' ? null : (s.text ? form[s.key] : parseFloat(form[s.key])) })
 
-    const { data, error } = await supabase.from('inventory_prices').insert(payload).select().single()
-    setSaving(false)
-    if (error) { setSubmitError(error.message); return }
-    onAdded(data)
-    setForm(blank())
-    setErrors({})
-    logAdminAction(session, 'product_added', roleKey, { category, sku: data.sku })
+    if (isEdit) {
+      payload.stock_qty     = form.stock_qty     === '' ? null : parseInt(form.stock_qty, 10)
+      payload.reorder_point = form.reorder_point === '' ? null : parseInt(form.reorder_point, 10)
+      payload.supplier      = form.supplier.trim() || null
+      payload.in_stock      = form.in_stock
+      payload.updated_at    = new Date().toISOString()
+
+      const { data, error } = await supabase.from('inventory_prices').update(payload).eq('role_key', editRow.role_key).select().single()
+      setSaving(false)
+      if (error) { setSubmitError(error.message); return }
+
+      const priceChanged = parseFloat(form.buying_price_kes) !== Number(editRow.buying_price_kes || 0)
+      const qtyDelta = payload.stock_qty != null ? payload.stock_qty - (editRow.stock_qty || 0) : 0
+      logAdminAction(session, 'item_updated', editRow.role_key, { sku: data.sku })
+      if (priceChanged) logAdminAction(session, 'price_update', editRow.role_key, { from: editRow.buying_price_kes, to: payload.buying_price_kes })
+      if (qtyDelta !== 0) await logStockMovement({ roleKey: editRow.role_key, quantityChanged: qtyDelta, reason: form.reason?.trim(), session })
+      onSaved(data)
+    } else {
+      const roleKey = `${category}_${form.sku.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${Date.now().toString(36)}`
+      payload.role_key = roleKey
+      payload.category = category
+      payload.tier = 'balanced'
+      payload.unit = 'each'
+
+      const { data, error } = await supabase.from('inventory_prices').insert(payload).select().single()
+      setSaving(false)
+      if (error) { setSubmitError(error.message); return }
+      logAdminAction(session, 'product_added', roleKey, { category, sku: data.sku })
+      onSaved(data)
+    }
   }
 
   const fieldClass = key => `border rounded-lg px-2 py-1.5 text-sm outline-none ${errors[key] ? 'border-red-400 focus:border-red-500' : 'border-gray-200 focus:border-blue-400'}`
 
   return (
     <div className="p-4 bg-blue-50 border-b border-blue-100 space-y-2">
+      {isEdit && <div className="text-xs font-black text-blue-800 uppercase tracking-wider">Editing: {editRow.description}</div>}
       <div className="grid grid-cols-2 gap-2">
         <div>
           <input placeholder="Brand / model (e.g. JA Solar 700W N-Type) *" value={form.sku}
@@ -323,9 +367,11 @@ function AddItemForm({ category, onAdded, session, cloneFrom }) {
         {errors.description && <p className="text-xs text-red-600 mt-0.5">{errors.description}</p>}
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <input placeholder={`${meta.capacityLabel} (${meta.capacityUnit}) — optional`} type="number" value={form.capacity}
-          onChange={e => updateField('capacity', e.target.value)}
-          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
+        {meta && (
+          <input placeholder={`${meta.capacityLabel} (${meta.capacityUnit}) — optional`} type="number" value={form.capacity}
+            onChange={e => updateField('capacity', e.target.value)}
+            className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
+        )}
         <input placeholder="Weight (kg) — optional" type="number" value={form.unit_weight_kg}
           onChange={e => updateField('unit_weight_kg', e.target.value)}
           className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
@@ -344,12 +390,41 @@ function AddItemForm({ category, onAdded, session, cloneFrom }) {
             className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-blue-400" />
         ))}
       </div>
+
+      {isEdit && (
+        <div className="pt-2 border-t border-blue-100 space-y-2">
+          <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Stock & Supply</div>
+          <div className="flex gap-2 items-center flex-wrap">
+            <input placeholder="Stock qty" type="number" value={form.stock_qty}
+              onChange={e => updateField('stock_qty', e.target.value)}
+              className="w-28 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
+            <span className="text-xs text-gray-400">reorder at</span>
+            <input placeholder="—" type="number" value={form.reorder_point}
+              onChange={e => updateField('reorder_point', e.target.value)}
+              className="w-24 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
+            <label className="flex items-center gap-1.5 text-sm text-gray-600 ml-auto">
+              <input type="checkbox" checked={form.in_stock} onChange={e => updateField('in_stock', e.target.checked)} className="w-4 h-4" />
+              In stock (orderable)
+            </label>
+          </div>
+          <input placeholder="Supplier name" value={form.supplier}
+            onChange={e => updateField('supplier', e.target.value)}
+            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
+          <input placeholder="Reason for quantity change (optional)" value={form.reason}
+            onChange={e => updateField('reason', e.target.value)}
+            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
+        </div>
+      )}
+
       <p className="text-xs text-blue-600">Fields marked * are required. Leave any spec blank if you don't know it yet — it just won't show in the customer comparison.</p>
       {submitError && <p className="text-xs text-red-600 font-semibold bg-red-50 p-2 rounded-lg">{submitError}</p>}
-      <button onClick={save} disabled={saving}
-        className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition disabled:opacity-50">
-        {saving ? 'Adding…' : 'Add Product'}
-      </button>
+      <div className="flex gap-2">
+        <button onClick={save} disabled={saving}
+          className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition disabled:opacity-50">
+          {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Add Product'}
+        </button>
+        {onCancel && <button onClick={onCancel} className="text-xs text-gray-400 hover:text-gray-600 px-2">Cancel</button>}
+      </div>
     </div>
   )
 }
@@ -486,9 +561,15 @@ const ROLE_KEY_COLUMN = { panel: 'panel_role_key', inverter: 'inverter_role_key'
 // Zoho-style item detail modal — Overview / Transactions / History, plus
 // Clone / Mark Active-Inactive / Delete. Layered on top of the existing
 // inline table editing rather than replacing it, since that already works.
+// Read-only view (+ Clone/Mark Inactive/Delete actions) — editing values
+// happens exclusively through EditItemForm, reached via the table row's
+// single "Edit" button, never through this modal. Keeping "view" and
+// "edit" as two distinct surfaces (rather than an edit mode bolted onto
+// this modal) avoids the exact bug this replaced: two different edit
+// forms for the same fields, each with its own state, showing different
+// results depending on which one was used last.
 function ItemDetailModal({ row, category, onClose, onChanged, onCloneRequested, session }) {
   const meta = CATEGORY_META[category]
-  const specFields = SPEC_FIELDS[category] || []
   const [tab, setTab] = useState('overview')
   const [transactions, setTransactions] = useState(null)
   const [loadingTx, setLoadingTx] = useState(false)
@@ -496,59 +577,6 @@ function ItemDetailModal({ row, category, onClose, onChanged, onCloneRequested, 
   const [loadingHist, setLoadingHist] = useState(false)
   const [busy, setBusy] = useState(false)
   const [deleteBlocked, setDeleteBlocked] = useState(null)
-
-  // Editing SKU/description/specs — separate from the inline price/stock
-  // editors already on the table row, since those cover different fields.
-  // Previously there was NO way to fix a typo in the customer-facing
-  // description or brand/model name after creation short of delete +
-  // recreate (often blocked once there's any history) — a real gap for
-  // text customers actually see.
-  const [editingDetails, setEditingDetails] = useState(false)
-  const [form, setForm] = useState(null)
-  const [errors, setErrors] = useState({})
-  const [submitError, setSubmitError] = useState('')
-
-  function startEditDetails() {
-    const f = {
-      sku: row.sku || '', description: row.description || '',
-      capacity: meta && row[meta.capacityField] != null ? String(row[meta.capacityField]) : '',
-      unit_weight_kg: row.unit_weight_kg != null ? String(row.unit_weight_kg) : '',
-      vat_status: row.vat_status || 'standard',
-    }
-    specFields.forEach(s => { f[s.key] = row[s.key] != null ? String(row[s.key]) : '' })
-    setForm(f)
-    setErrors({}); setSubmitError('')
-    setEditingDetails(true)
-  }
-
-  function validateDetailField(key, value) {
-    if (key === 'sku' && !value.trim()) return 'Brand/model is required.'
-    if (key === 'description' && !value.trim()) return 'Description is required.'
-    return null
-  }
-  function updateDetailField(key, value) {
-    setForm(f => ({ ...f, [key]: value }))
-    if (errors[key]) setErrors(e => ({ ...e, [key]: null }))
-  }
-
-  async function saveDetails() {
-    const nextErrors = {}
-    ;['sku', 'description'].forEach(key => { const msg = validateDetailField(key, form[key]); if (msg) nextErrors[key] = msg })
-    if (Object.keys(nextErrors).length > 0) { setErrors(nextErrors); return }
-
-    setBusy(true); setSubmitError('')
-    const payload = { sku: form.sku.trim(), description: form.description.trim(), vat_status: form.vat_status || 'standard', updated_at: new Date().toISOString() }
-    if (meta) payload[meta.capacityField] = form.capacity === '' ? null : parseFloat(form.capacity)
-    payload.unit_weight_kg = form.unit_weight_kg === '' ? null : parseFloat(form.unit_weight_kg)
-    specFields.forEach(s => { payload[s.key] = form[s.key] === '' ? null : (s.text ? form[s.key] : parseFloat(form[s.key])) })
-
-    const { data, error } = await supabase.from('inventory_prices').update(payload).eq('role_key', row.role_key).select().single()
-    setBusy(false)
-    if (error) { setSubmitError(error.message); return }
-    onChanged(data)
-    logAdminAction(session, 'item_details_updated', row.role_key, { sku: data.sku })
-    setEditingDetails(false)
-  }
 
   useEffect(() => {
     if (tab === 'transactions' && transactions === null) {
@@ -622,7 +650,7 @@ function ItemDetailModal({ row, category, onClose, onChanged, onCloneRequested, 
         </div>
 
         <div className="p-5">
-          {tab === 'overview' && !editingDetails && (
+          {tab === 'overview' && (
             <div className="space-y-2 text-sm">
               <div className="flex justify-between"><span className="text-gray-400">Brand / model</span><span className="font-bold">{row.sku}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Description</span><span className="font-bold text-right max-w-xs">{row.description}</span></div>
@@ -631,57 +659,10 @@ function ItemDetailModal({ row, category, onClose, onChanged, onCloneRequested, 
               <div className="flex justify-between"><span className="text-gray-400">Buying price</span><span className="font-bold">{formatKsh(row.buying_price_kes)}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Selling price</span><span className="font-bold text-emerald-700">{formatKsh(row.buying_price_kes * 1.35)}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Stock on hand</span><span className="font-bold">{row.stock_qty ?? 'Not tracked'}</span></div>
+              <div className="flex justify-between"><span className="text-gray-400">Reorder point</span><span className="font-bold">{row.reorder_point ?? '—'}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Supplier</span><span className="font-bold">{row.supplier || '—'}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">VAT status</span><span className="font-bold">{VAT_STATUS_OPTIONS.find(o => o.value === (row.vat_status || 'standard'))?.label}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Status</span><span className="font-bold">{row.is_active === false ? 'Inactive' : 'Active'}{row.in_stock === false ? ' · Marked out of stock' : ''}</span></div>
-              <button onClick={startEditDetails} className="mt-3 text-xs font-bold text-blue-600 hover:text-blue-800">✏️ Edit Brand/Model, Description & Specs</button>
-            </div>
-          )}
-          {tab === 'overview' && editingDetails && (
-            <div className="space-y-2.5 text-sm">
-              <div>
-                <input placeholder="Brand / model *" value={form.sku} onChange={e => updateDetailField('sku', e.target.value)}
-                  className={`w-full border rounded-lg px-2 py-1.5 text-sm outline-none ${errors.sku ? 'border-red-400' : 'border-gray-200 focus:border-blue-400'}`} />
-                {errors.sku && <p className="text-xs text-red-600 mt-0.5">{errors.sku}</p>}
-              </div>
-              <div>
-                <input placeholder="Description (shown to customers) *" value={form.description} onChange={e => updateDetailField('description', e.target.value)}
-                  className={`w-full border rounded-lg px-2 py-1.5 text-sm outline-none ${errors.description ? 'border-red-400' : 'border-gray-200 focus:border-blue-400'}`} />
-                {errors.description && <p className="text-xs text-red-600 mt-0.5">{errors.description}</p>}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {meta && (
-                  <input placeholder={`${meta.capacityLabel} (${meta.capacityUnit})`} type="number" value={form.capacity}
-                    onChange={e => updateDetailField('capacity', e.target.value)}
-                    className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
-                )}
-                <input placeholder="Weight (kg)" type="number" value={form.unit_weight_kg}
-                  onChange={e => updateDetailField('unit_weight_kg', e.target.value)}
-                  className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">VAT status</label>
-                <select value={form.vat_status} onChange={e => updateDetailField('vat_status', e.target.value)}
-                  className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white outline-none focus:border-blue-400">
-                  {VAT_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </div>
-              {specFields.length > 0 && (
-                <div className="grid grid-cols-3 gap-2">
-                  {specFields.map(s => (
-                    <input key={s.key} placeholder={s.label} type={s.text ? 'text' : 'number'} value={form[s.key]}
-                      onChange={e => updateDetailField(s.key, e.target.value)}
-                      className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-blue-400" />
-                  ))}
-                </div>
-              )}
-              {submitError && <p className="text-xs text-red-600 font-semibold bg-red-50 p-2 rounded-lg">{submitError}</p>}
-              <div className="flex gap-2 pt-1">
-                <button onClick={saveDetails} disabled={busy} className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition disabled:opacity-50">
-                  {busy ? 'Saving…' : 'Save Changes'}
-                </button>
-                <button onClick={() => setEditingDetails(false)} className="text-xs text-gray-400 hover:text-gray-600 px-2">Cancel</button>
-              </div>
             </div>
           )}
           {tab === 'transactions' && (
@@ -763,19 +744,13 @@ function getTierBadge(category, price, priceBands) {
 function InventoryTable({ session, invSection }) {
   const [rows,       setRows]       = useState({})
   const [priceBands, setPriceBands] = useState(defaultBandsAsRows)
-  const [editing, setEditing] = useState({})
-  const [saving,  setSaving]  = useState({})
-  const [saved,   setSaved]   = useState({})
   const [loading, setLoading] = useState(true)
-  const [addingTo, setAddingTo] = useState(null)  // which category's "+ Add Item" form is open
-  const [cloneSource, setCloneSource] = useState(null)  // row being cloned into the Add Item form, if any
-  const [viewingItem, setViewingItem] = useState(null)  // { row, category } for the detail modal
-
-  // Stock qty + reorder point + supplier (+ specs, for product categories) —
-  // edited together as one small form, separate from price since touched far less often.
-  const [editingStock, setEditingStock] = useState({})
-  const [savingStock,  setSavingStock]  = useState({})
-  const [savedStock,   setSavedStock]   = useState({})
+  // The one and only place editing/adding an item happens: null, or
+  // { category, mode: 'add'|'edit', editRow?, cloneFrom? }. Replaces what
+  // used to be three separate inline editors (price, stock, and a modal
+  // edit form) each with their own state — see ItemForm's comment.
+  const [formState, setFormState] = useState(null)
+  const [viewingItem, setViewingItem] = useState(null)  // { row, category } for the read-only detail modal
 
   useEffect(() => {
     Promise.all([
@@ -794,88 +769,6 @@ function InventoryTable({ session, invSection }) {
 
   function handleBandSaved(category, tier, row) {
     setPriceBands(p => ({ ...p, [category]: { ...p[category], [tier]: row } }))
-  }
-
-  function startEdit(key) {
-    setEditing(p => ({ ...p, [key]: String(Math.round(rows[key]?.buying_price_kes || 0)) }))
-  }
-  function cancelEdit(key) {
-    setEditing(p => { const n = { ...p }; delete n[key]; return n })
-  }
-  async function savePrice(key) {
-    const price = parseInt((editing[key]||'0').replace(/,/g,''), 10)
-    if (!price || price <= 0) return
-    setSaving(p => ({ ...p, [key]: true }))
-    const { error } = await supabase
-      .from('inventory_prices')
-      .update({ buying_price_kes: price, updated_at: new Date().toISOString() })
-      .eq('role_key', key)
-    setSaving(p => ({ ...p, [key]: false }))
-    if (!error) {
-      const previous = rows[key]?.buying_price_kes
-      setRows(p => ({ ...p, [key]: { ...p[key], buying_price_kes: price, updated_at: new Date().toISOString() } }))
-      cancelEdit(key)
-      setSaved(p => ({ ...p, [key]: true }))
-      setTimeout(() => setSaved(p => { const n={...p}; delete n[key]; return n }), 2500)
-      logAdminAction(session, 'price_update', key, { from: previous, to: price })
-    }
-  }
-  async function toggleStock(key) {
-    const next = !(rows[key]?.in_stock ?? true)
-    await supabase.from('inventory_prices').update({ in_stock: next, updated_at: new Date().toISOString() }).eq('role_key', key)
-    setRows(p => ({ ...p, [key]: { ...p[key], in_stock: next } }))
-    logAdminAction(session, 'stock_toggle', key, { in_stock: next })
-  }
-
-  // Deliberately narrow: stock_qty/reorder_point/supplier only. Capacity,
-  // weight, VAT status, and spec fields used to also live in this form —
-  // duplicated with the item detail modal's "Edit Details" (added for
-  // sku/description editing), which meant the SAME field could be edited
-  // in two different places with two different pieces of local state, so
-  // one could show stale data relative to the other. There is now exactly
-  // one place to edit each field: quick stock levels here, everything else
-  // (brand/model, description, capacity, weight, VAT, specs) in the modal.
-  function startEditStock(key) {
-    const r = rows[key] || {}
-    setEditingStock(p => ({ ...p, [key]: {
-      stock_qty:     r.stock_qty     != null ? String(r.stock_qty)     : '',
-      reorder_point: r.reorder_point != null ? String(r.reorder_point) : '',
-      supplier:      r.supplier || '',
-      reason:        '',
-    } }))
-  }
-  function cancelEditStock(key) {
-    setEditingStock(p => { const n = { ...p }; delete n[key]; return n })
-  }
-  function updateEditingStock(key, field, value) {
-    setEditingStock(p => ({ ...p, [key]: { ...p[key], [field]: value } }))
-  }
-  async function saveStock(key) {
-    const form = editingStock[key] || {}
-    const row  = rows[key] || {}
-    const payload = {
-      stock_qty:     form.stock_qty     === '' ? null : parseInt(form.stock_qty, 10),
-      reorder_point: form.reorder_point === '' ? null : parseInt(form.reorder_point, 10),
-      supplier:      (form.supplier || '').trim() || null,
-      updated_at:    new Date().toISOString(),
-    }
-    setSavingStock(p => ({ ...p, [key]: true }))
-    const { error } = await supabase.from('inventory_prices').update(payload).eq('role_key', key)
-    setSavingStock(p => ({ ...p, [key]: false }))
-    if (!error) {
-      const previousQty = row.stock_qty
-      setRows(p => ({ ...p, [key]: { ...p[key], ...payload } }))
-      cancelEditStock(key)
-      setSavedStock(p => ({ ...p, [key]: true }))
-      setTimeout(() => setSavedStock(p => { const n = { ...p }; delete n[key]; return n }), 2500)
-      logAdminAction(session, 'stock_level_update', key, payload)
-
-      // Log a ledger entry whenever the quantity actually changed
-      const delta = payload.stock_qty != null ? payload.stock_qty - (previousQty || 0) : 0
-      if (delta !== 0) {
-        await logStockMovement({ roleKey: key, quantityChanged: delta, reason: form.reason?.trim(), session })
-      }
-    }
   }
 
   if (loading) return <div className="flex items-center justify-center py-20 text-gray-400">Loading inventory…</div>
@@ -910,11 +803,8 @@ function InventoryTable({ session, invSection }) {
         </div>
       )}
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800 space-y-1">
-        <div><strong>To update a price:</strong> click the price → type new buying price → Save (or Enter).
-        Selling price = buying × 1.35 and updates automatically on all future client quotes.</div>
-        <div><strong>To track stock:</strong> click "Not tracked" / the quantity under Stock Qty → enter units on hand,
-        a reorder threshold, and your supplier. Leave blank if you don't want to track a particular item — it won't affect quoting either way.</div>
-        <div><strong>Tier is now automatic:</strong> it's derived from where a product's buying price falls in the Price Bands panel below — add a second or third brand to any category and it'll slot into the right tier on its own.</div>
+        <div><strong>To change anything about an item</strong> — price, stock, description, specs — click <strong>Edit</strong> on its row. That's the only place item fields are edited; there's no separate quick-edit anywhere else, so there's never a question of which value is current.</div>
+        <div><strong>Tier is automatic:</strong> it's derived from where a product's buying price falls in the Price Bands panel below — add a second or third brand to any category and it'll slot into the right tier on its own.</div>
       </div>
 
       {invSection === 'products' && (
@@ -926,15 +816,20 @@ function InventoryTable({ session, invSection }) {
           <div className="bg-gray-50 border-b border-gray-100 px-5 py-3 flex items-center justify-between">
             <h3 className="font-black text-gray-700 text-sm">{group.title}</h3>
             {group.category && (
-              <button onClick={() => { setAddingTo(a => a === group.category ? null : group.category); setCloneSource(null) }}
+              <button onClick={() => setFormState(f => f?.category === group.category && f.mode === 'add' ? null : { category: group.category, mode: 'add' })}
                 className="text-xs font-bold text-blue-600 hover:text-blue-800">
-                {addingTo === group.category ? '✕ Cancel' : '+ Add Item'}
+                {formState?.category === group.category && formState.mode === 'add' ? '✕ Cancel' : '+ Add Item'}
               </button>
             )}
           </div>
-          {group.category && addingTo === group.category && (
-            <AddItemForm category={group.category} session={session} cloneFrom={cloneSource}
-              onAdded={row => { setRows(p => ({ ...p, [row.role_key]: row })); setCloneSource(null) }} />
+          {formState && (
+            (formState.mode === 'add' && formState.category === group.category) ||
+            (formState.mode === 'edit' && group.items.some(i => i.key === formState.editRow.role_key))
+          ) && (
+            <ItemForm category={formState.category} mode={formState.mode} session={session}
+              editRow={formState.editRow} cloneFrom={formState.cloneFrom}
+              onCancel={() => setFormState(null)}
+              onSaved={row => { setRows(p => ({ ...p, [row.role_key]: row })); setFormState(null) }} />
           )}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -955,7 +850,6 @@ function InventoryTable({ session, invSection }) {
                   const buying  = Number(row.buying_price_kes || 0)
                   const selling = Math.round(buying * 1.35)
                   const inStock = row.in_stock !== false
-                  const isEdit  = item.key in editing
                   const updated = row.updated_at
                     ? new Date(row.updated_at).toLocaleDateString('en-KE', { day:'2-digit', month:'short' })
                     : '—'
@@ -979,89 +873,35 @@ function InventoryTable({ session, invSection }) {
                           </>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        {isEdit ? (
-                          <input type="number" value={editing[item.key]} autoFocus
-                            onChange={e => setEditing(p => ({ ...p, [item.key]: e.target.value }))}
-                            onKeyDown={e => { if (e.key==='Enter') savePrice(item.key); if (e.key==='Escape') cancelEdit(item.key) }}
-                            className="w-28 border-2 border-blue-400 rounded-lg px-2 py-1 text-right font-mono text-sm outline-none" />
-                        ) : (
-                          <button onClick={() => startEdit(item.key)}
-                            className="font-mono font-bold text-gray-800 hover:text-blue-600 hover:underline transition tabular-nums">
-                            {formatKsh(buying)}
-                          </button>
-                        )}
-                      </td>
+                      <td className="px-4 py-3 text-right font-mono font-bold text-gray-800 tabular-nums">{formatKsh(buying)}</td>
                       <td className="px-4 py-3 text-right font-mono font-semibold text-emerald-700 tabular-nums">
                         {formatKsh(selling)}
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <button onClick={() => toggleStock(item.key)}
-                          className={`relative inline-flex w-10 h-6 rounded-full transition-colors ${inStock ? 'bg-green-500' : 'bg-gray-300'}`}>
-                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${inStock ? 'translate-x-4' : 'translate-x-0'}`} />
-                        </button>
+                        <span className={`text-xs font-bold px-2 py-1 rounded-full ${inStock ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'}`}>
+                          {inStock ? 'In Stock' : 'Out of Stock'}
+                        </span>
                       </td>
                       <td className="px-4 py-3">
-                        {item.key in editingStock ? (
-                          <div className="flex flex-col gap-1 min-w-[180px]">
-                            <div className="flex gap-1 items-center">
-                              <input type="number" placeholder="Qty" value={editingStock[item.key].stock_qty}
-                                onChange={e => updateEditingStock(item.key, 'stock_qty', e.target.value)}
-                                className="w-16 border-2 border-blue-400 rounded-lg px-2 py-1 text-xs font-mono outline-none" />
-                              <span className="text-xs text-gray-400">reorder@</span>
-                              <input type="number" placeholder="—" value={editingStock[item.key].reorder_point}
-                                onChange={e => updateEditingStock(item.key, 'reorder_point', e.target.value)}
-                                className="w-14 border-2 border-blue-400 rounded-lg px-2 py-1 text-xs font-mono outline-none" />
-                            </div>
-                            <input type="text" placeholder="Supplier name" value={editingStock[item.key].supplier}
-                              onChange={e => updateEditingStock(item.key, 'supplier', e.target.value)}
-                              className="border-2 border-blue-400 rounded-lg px-2 py-1 text-xs outline-none" />
-                            <input type="text" placeholder="Reason for qty change (optional)" value={editingStock[item.key].reason}
-                              onChange={e => updateEditingStock(item.key, 'reason', e.target.value)}
-                              onKeyDown={e => { if (e.key === 'Enter') saveStock(item.key); if (e.key === 'Escape') cancelEditStock(item.key) }}
-                              className="border-2 border-blue-400 rounded-lg px-2 py-1 text-xs outline-none" />
-                            <div className="flex gap-1">
-                              <button onClick={() => saveStock(item.key)} disabled={savingStock[item.key]}
-                                className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-2 py-1 rounded-lg transition disabled:opacity-50">
-                                {savingStock[item.key] ? '…' : 'Save'}
-                              </button>
-                              <button onClick={() => cancelEditStock(item.key)} className="text-xs text-gray-400 hover:text-gray-600 px-1">✕</button>
-                            </div>
-                            <div className="text-[10px] text-gray-400 italic">Capacity, weight, VAT & specs: click the item name →</div>
+                        {row.stock_qty != null ? (
+                          <div className={`text-xs font-bold tabular-nums ${
+                            row.reorder_point != null && row.stock_qty <= row.reorder_point ? 'text-red-600' : 'text-gray-700'}`}>
+                            {row.stock_qty} unit{row.stock_qty !== 1 ? 's' : ''}
+                            {row.reorder_point != null && row.stock_qty <= row.reorder_point && ' ⚠️ Low'}
                           </div>
                         ) : (
-                          <button onClick={() => startEditStock(item.key)} className="text-left hover:bg-gray-50 rounded-lg px-1 -mx-1 py-0.5 transition">
-                            {row.stock_qty != null ? (
-                              <div className={`text-xs font-bold tabular-nums ${
-                                row.reorder_point != null && row.stock_qty <= row.reorder_point ? 'text-red-600' : 'text-gray-700'}`}>
-                                {row.stock_qty} unit{row.stock_qty !== 1 ? 's' : ''}
-                                {row.reorder_point != null && row.stock_qty <= row.reorder_point && ' ⚠️ Low'}
-                              </div>
-                            ) : (
-                              <div className="text-xs text-gray-300 italic">Not tracked</div>
-                            )}
-                            {row.supplier && <div className="text-xs text-gray-400">{row.supplier}</div>}
-                            {savedStock[item.key] && <div className="text-xs text-green-600 font-bold">✓ Saved</div>}
-                          </button>
+                          <div className="text-xs text-gray-300 italic">Not tracked</div>
                         )}
+                        {row.supplier && <div className="text-xs text-gray-400">{row.supplier}</div>}
                         {row.stock_qty != null && <StockHistoryToggle roleKey={item.key} />}
                         {group.category === 'inverter' && <SerialsToggle roleKey={item.key} session={session} />}
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-400">{updated}</td>
                       <td className="px-4 py-3">
-                        {isEdit ? (
-                          <div className="flex gap-1">
-                            <button onClick={() => savePrice(item.key)} disabled={saving[item.key]}
-                              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition disabled:opacity-50">
-                              {saving[item.key] ? '…' : 'Save'}
-                            </button>
-                            <button onClick={() => cancelEdit(item.key)} className="text-xs text-gray-400 hover:text-gray-600 px-1">✕</button>
-                          </div>
-                        ) : saved[item.key] ? (
-                          <span className="text-green-600 text-xs font-bold">✓ Saved</span>
-                        ) : (
-                          <button onClick={() => startEdit(item.key)} className="text-xs text-blue-500 hover:text-blue-700 font-semibold">Edit</button>
-                        )}
+                        <button onClick={() => setFormState({ category: row.category, mode: 'edit', editRow: row })}
+                          className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition">
+                          Edit
+                        </button>
                       </td>
                     </tr>
                   )
@@ -1091,8 +931,7 @@ function InventoryTable({ session, invSection }) {
             }
           }}
           onCloneRequested={sourceRow => {
-            setCloneSource(sourceRow)
-            setAddingTo(viewingItem.category)
+            setFormState({ category: viewingItem.category, mode: 'add', cloneFrom: sourceRow })
             setViewingItem(null)
           }}
         />
