@@ -197,6 +197,34 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useInvoiceCalc, invoiceAmount, invoiceQty, discountPct, vatInclusive])
 
+  // Selling price is derived from buying price + margin, but it's also the
+  // number an admin actually thinks in — so it's directly editable too.
+  // Typing a selling price back-solves the margin % that produces it, and
+  // typing a margin % re-derives the selling price shown here. `pricedFrom`
+  // tracks which side was last edited so the two don't fight over rounding
+  // while one is mid-edit.
+  const [sellingPriceInput, setSellingPriceInput] = useState('')
+  const [pricedFrom, setPricedFrom] = useState<'margin' | 'selling'>('margin')
+
+  useEffect(() => {
+    if (pricedFrom !== 'margin') return
+    const buying = parseFloat(form.buyingPriceKes) || 0
+    if (!buying) { setSellingPriceInput(''); return }
+    const margin = form.marginPct === '' ? null : parseFloat(form.marginPct)
+    setSellingPriceInput(String(Math.round(sellPrice(buying, margin) * 100) / 100))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.buyingPriceKes, form.marginPct, pricedFrom])
+
+  function handleSellingPriceChange(value: string) {
+    setPricedFrom('selling')
+    setSellingPriceInput(value)
+    const buying  = parseFloat(form.buyingPriceKes) || 0
+    const selling = parseFloat(value)
+    if (buying > 0 && selling >= 0) {
+      updateTop('marginPct', String(Math.round(((selling / buying) - 1) * 100 * 100) / 100))
+    }
+  }
+
   // Specs sourced from a real manufacturer datasheet (see migration 032)
   // are locked against casual retyping — an admin has to deliberately hit
   // "Unlock to correct" first. Saving after unlocking demotes the row back
@@ -428,7 +456,7 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
             </button>
           </div>
           <input type="number" value={form.buyingPriceKes} disabled={useInvoiceCalc}
-            onChange={e => updateTop('buyingPriceKes', e.target.value)} onBlur={() => handleBlur('buyingPriceKes')}
+            onChange={e => { setPricedFrom('margin'); updateTop('buyingPriceKes', e.target.value) }} onBlur={() => handleBlur('buyingPriceKes')}
             className={`w-full ${fieldClass('buyingPriceKes', useInvoiceCalc)}`} />
           {errors.buyingPriceKes && <p className="text-xs text-red-600 mt-0.5">{errors.buyingPriceKes}</p>}
         </div>
@@ -472,21 +500,19 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
           <div>
             <label className="block text-xs text-gray-500 mb-1">Margin (%) <span className="text-gray-300">— optional, {DEFAULT_MARGIN_PCT}% default</span></label>
             <input type="number" placeholder={String(DEFAULT_MARGIN_PCT)} value={form.marginPct}
-              onChange={e => updateTop('marginPct', e.target.value)}
+              onChange={e => { setPricedFrom('margin'); updateTop('marginPct', e.target.value) }}
               className={`w-full ${fieldClass('marginPct')}`} />
           </div>
-          <div className="flex flex-col justify-end pb-1.5">
-            <span className="text-xs text-gray-400">
-              Sells at{' '}
-              <span className="font-bold text-emerald-700">
-                {form.buyingPriceKes
-                  ? formatKsh(sellPrice(parseFloat(form.buyingPriceKes) || 0, form.marginPct === '' ? null : parseFloat(form.marginPct)))
-                  : '—'}
-              </span>
-              {form.marginPct === '' ? ` (${DEFAULT_MARGIN_PCT}% default)` : ` (${form.marginPct}% margin)`}
-            </span>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Sells at (Ksh) <span className="text-gray-300">— editable, sets margin above</span></label>
+            <input type="number" value={sellingPriceInput} disabled={!form.buyingPriceKes}
+              onChange={e => handleSellingPriceChange(e.target.value)}
+              className="w-full border-2 border-emerald-400 bg-emerald-50 rounded-lg px-2 py-1.5 text-sm font-bold text-emerald-800 outline-none focus:border-emerald-500 disabled:opacity-50 disabled:bg-gray-50 disabled:border-gray-200" />
           </div>
         </div>
+        <p className="text-[11px] text-gray-400 -mt-1">
+          {form.marginPct === '' ? `${DEFAULT_MARGIN_PCT}% default margin` : `${form.marginPct}% margin`} — type in either field, the other updates to match.
+        </p>
         <div className="grid grid-cols-2 gap-2 mt-2">
           <TextField path="wholesalePriceKes" label="Wholesale price (Ksh)" value={form.wholesalePriceKes}
             onChange={e => updateTop('wholesalePriceKes', e.target.value)} />
