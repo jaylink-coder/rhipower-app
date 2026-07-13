@@ -319,13 +319,19 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
   const fieldClass = (key: string) =>
     `border rounded-lg px-2 py-1.5 text-sm outline-none ${errors[key] ? 'border-red-400 focus:border-red-500' : 'border-gray-200 focus:border-blue-400'}`
 
-  function TextField({ path, placeholder, value, onChange, wide }: {
-    path: string; placeholder: string; value: string
-    onChange: (e: ChangeEvent<HTMLInputElement>) => void; wide?: boolean
+  // Labels are permanent, unlike placeholder text — a placeholder disappears
+  // the moment a value is typed, so a saved numeric field (e.g. "590") would
+  // otherwise give no clue what it means once the form is reopened for editing.
+  function TextField({ path, label, value, onChange, wide, required }: {
+    path: string; label: string; value: string
+    onChange: (e: ChangeEvent<HTMLInputElement>) => void; wide?: boolean; required?: boolean
   }) {
     return (
       <div className={wide ? 'col-span-2' : ''}>
-        <input placeholder={placeholder} type="number" value={value} onChange={onChange}
+        <label className="block text-xs text-gray-500 mb-1">
+          {label}{!required && <span className="text-gray-300"> — optional</span>}
+        </label>
+        <input type="number" value={value} onChange={onChange}
           className={`w-full ${fieldClass(path)}`} />
         {errors[path] && <p className="text-xs text-red-600 mt-0.5">{errors[path]}</p>}
       </div>
@@ -338,8 +344,9 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
   }) {
     return (
       <div>
+        <label className="block text-xs text-gray-500 mb-1">{label} <span className="text-gray-300">— optional</span></label>
         <select value={value} onChange={onChange} className={`w-full bg-white ${fieldClass(path)}`}>
-          <option value="">{label} — optional</option>
+          <option value="">— choose —</option>
           {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </div>
@@ -350,30 +357,33 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-3">
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <input placeholder="Brand / model (e.g. JA Solar 700W N-Type) *" value={form.sku}
+          <label className="block text-xs text-gray-500 mb-1">Brand / model *</label>
+          <input placeholder="e.g. JA Solar 700W N-Type" value={form.sku}
             onChange={e => updateTop('sku', e.target.value)} onBlur={() => handleBlur('sku')}
             className={`w-full ${fieldClass('sku')}`} />
           {errors.sku && <p className="text-xs text-red-600 mt-0.5">{errors.sku}</p>}
         </div>
         <div>
-          <input placeholder="Buying price (Ksh) *" type="number" value={form.buyingPriceKes}
+          <label className="block text-xs text-gray-500 mb-1">Buying price (Ksh) *</label>
+          <input type="number" value={form.buyingPriceKes}
             onChange={e => updateTop('buyingPriceKes', e.target.value)} onBlur={() => handleBlur('buyingPriceKes')}
             className={`w-full ${fieldClass('buyingPriceKes')}`} />
           {errors.buyingPriceKes && <p className="text-xs text-red-600 mt-0.5">{errors.buyingPriceKes}</p>}
         </div>
       </div>
       <div>
-        <input placeholder="Full description (shown to customers) *" value={form.description}
+        <label className="block text-xs text-gray-500 mb-1">Description *</label>
+        <input placeholder="Full description, shown to customers" value={form.description}
           onChange={e => updateTop('description', e.target.value)} onBlur={() => handleBlur('description')}
           className={`w-full ${fieldClass('description')}`} />
         {errors.description && <p className="text-xs text-red-600 mt-0.5">{errors.description}</p>}
       </div>
       <div className="grid grid-cols-2 gap-2">
         {meta && (
-          <TextField path="capacity" placeholder={`${meta.capacityLabel} (${meta.capacityUnit}) — optional`}
+          <TextField path="capacity" label={`${meta.capacityLabel} (${meta.capacityUnit})`}
             value={form.capacity} onChange={e => updateTop('capacity', e.target.value)} />
         )}
-        <TextField path="unitWeightKg" placeholder="Weight (kg) — optional"
+        <TextField path="unitWeightKg" label="Weight (kg)"
           value={form.unitWeightKg} onChange={e => updateTop('unitWeightKg', e.target.value)} />
       </div>
       <div>
@@ -389,11 +399,11 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
           <div className="pt-2 border-t border-gray-100">
             <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Dimensions (mm)</div>
             <div className="grid grid-cols-3 gap-2">
-              <TextField path="dimensions.lengthMm" placeholder="Length — optional" value={form.dimensions.lengthMm}
+              <TextField path="dimensions.lengthMm" label="Length (mm)" value={form.dimensions.lengthMm}
                 onChange={e => updateGroup('dimensions', 'lengthMm', e.target.value)} />
-              <TextField path="dimensions.widthMm" placeholder="Width — optional" value={form.dimensions.widthMm}
+              <TextField path="dimensions.widthMm" label="Width (mm)" value={form.dimensions.widthMm}
                 onChange={e => updateGroup('dimensions', 'widthMm', e.target.value)} />
-              <TextField path="dimensions.thicknessMm" placeholder="Thickness — optional" value={form.dimensions.thicknessMm}
+              <TextField path="dimensions.thicknessMm" label="Thickness (mm)" value={form.dimensions.thicknessMm}
                 onChange={e => updateGroup('dimensions', 'thicknessMm', e.target.value)} />
             </div>
           </div>
@@ -401,9 +411,9 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
           <div>
             <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Electrical</div>
             <div className="grid grid-cols-2 gap-2">
-              <TextField path="electrical.nominalVoltageV" placeholder="Nominal voltage (V) — optional" value={form.electrical.nominalVoltageV}
+              <TextField path="electrical.nominalVoltageV" label="Nominal voltage — Vmp (V)" value={form.electrical.nominalVoltageV}
                 onChange={e => updateGroup('electrical', 'nominalVoltageV', e.target.value)} />
-              <TextField path="electrical.maxCurrentAmps" placeholder="Max current (A) — optional" value={form.electrical.maxCurrentAmps}
+              <TextField path="electrical.maxCurrentAmps" label="Max current — Isc (A)" value={form.electrical.maxCurrentAmps}
                 onChange={e => updateGroup('electrical', 'maxCurrentAmps', e.target.value)} />
             </div>
           </div>
@@ -411,12 +421,13 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
           <div>
             <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Environmental</div>
             <div className="grid grid-cols-3 gap-2">
-              <TextField path="environmental.operatingTempMinC" placeholder="Min temp (°C) — optional" value={form.environmental.operatingTempMinC}
+              <TextField path="environmental.operatingTempMinC" label="Min operating temp (°C)" value={form.environmental.operatingTempMinC}
                 onChange={e => updateGroup('environmental', 'operatingTempMinC', e.target.value)} />
-              <TextField path="environmental.operatingTempMaxC" placeholder="Max temp (°C) — optional" value={form.environmental.operatingTempMaxC}
+              <TextField path="environmental.operatingTempMaxC" label="Max operating temp (°C)" value={form.environmental.operatingTempMaxC}
                 onChange={e => updateGroup('environmental', 'operatingTempMaxC', e.target.value)} />
               <div>
-                <input placeholder="IP rating (e.g. IP65) — optional" value={form.environmental.ipRating}
+                <label className="block text-xs text-gray-500 mb-1">IP rating <span className="text-gray-300">— optional</span></label>
+                <input placeholder="e.g. IP65" value={form.environmental.ipRating}
                   onChange={e => updateGroup('environmental', 'ipRating', e.target.value)}
                   className={`w-full ${fieldClass('environmental.ipRating')}`} />
                 {errors['environmental.ipRating'] && <p className="text-xs text-red-600 mt-0.5">{errors['environmental.ipRating']}</p>}
@@ -428,17 +439,17 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
             <div>
               <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Panel Specs</div>
               <div className="grid grid-cols-3 gap-2">
-                <TextField path="panel.efficiencyPct" placeholder="Efficiency (%) — optional" value={form.panel.efficiencyPct}
+                <TextField path="panel.efficiencyPct" label="Efficiency (%)" value={form.panel.efficiencyPct}
                   onChange={e => updateGroup('panel', 'efficiencyPct', e.target.value)} />
-                <TextField path="panel.warrantyYears" placeholder="Warranty (yr) — optional" value={form.panel.warrantyYears}
+                <TextField path="panel.warrantyYears" label="Warranty (yr)" value={form.panel.warrantyYears}
                   onChange={e => updateGroup('panel', 'warrantyYears', e.target.value)} />
-                <TextField path="panel.degradationPctYr" placeholder="Degradation (%/yr) — optional" value={form.panel.degradationPctYr}
+                <TextField path="panel.degradationPctYr" label="Degradation (%/yr)" value={form.panel.degradationPctYr}
                   onChange={e => updateGroup('panel', 'degradationPctYr', e.target.value)} />
                 <SelectField path="panel.cellType" label="Cell type" value={form.panel.cellType}
                   onChange={e => updateGroup('panel', 'cellType', e.target.value)} options={CELL_TYPE_OPTIONS} />
-                <TextField path="panel.tempCoefficientPctC" placeholder="Temp coefficient (%/°C) — optional" value={form.panel.tempCoefficientPctC}
+                <TextField path="panel.tempCoefficientPctC" label="Temp coefficient (%/°C)" value={form.panel.tempCoefficientPctC}
                   onChange={e => updateGroup('panel', 'tempCoefficientPctC', e.target.value)} />
-                <TextField path="panel.vocV" placeholder="Voc — open-circuit voltage (V) — optional" value={form.panel.vocV}
+                <TextField path="panel.vocV" label="Voc — open-circuit voltage (V)" value={form.panel.vocV}
                   onChange={e => updateGroup('panel', 'vocV', e.target.value)} />
               </div>
               <p className="text-[11px] text-gray-400 mt-1">Voc (above) plus the Electrical section's Nominal Voltage (Vmp) and Max Current (Isc) are what let RhiPower check this panel is compatible with a chosen inverter's MPPT input.</p>
@@ -449,30 +460,31 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
             <div>
               <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Inverter Specs</div>
               <div className="grid grid-cols-3 gap-2">
-                <TextField path="inverter.efficiencyPct" placeholder="Efficiency (%) — optional" value={form.inverter.efficiencyPct}
+                <TextField path="inverter.efficiencyPct" label="Efficiency (%)" value={form.inverter.efficiencyPct}
                   onChange={e => updateGroup('inverter', 'efficiencyPct', e.target.value)} />
-                <TextField path="inverter.warrantyYears" placeholder="Warranty (yr) — optional" value={form.inverter.warrantyYears}
+                <TextField path="inverter.warrantyYears" label="Warranty (yr)" value={form.inverter.warrantyYears}
                   onChange={e => updateGroup('inverter', 'warrantyYears', e.target.value)} />
-                <TextField path="inverter.mpptCount" placeholder="MPPT count — optional" value={form.inverter.mpptCount}
+                <TextField path="inverter.mpptCount" label="MPPT tracker count" value={form.inverter.mpptCount}
                   onChange={e => updateGroup('inverter', 'mpptCount', e.target.value)} />
                 <SelectField path="inverter.phase" label="Phase" value={form.inverter.phase}
                   onChange={e => updateGroup('inverter', 'phase', e.target.value)} options={PHASE_OPTIONS} />
                 <SelectField path="inverter.inverterType" label="Inverter type" value={form.inverter.inverterType}
                   onChange={e => updateGroup('inverter', 'inverterType', e.target.value)} options={INVERTER_TYPE_OPTIONS} />
-                <TextField path="inverter.continuousPowerW" placeholder="Continuous power (W) — optional" value={form.inverter.continuousPowerW}
+                <TextField path="inverter.continuousPowerW" label="Continuous power (W)" value={form.inverter.continuousPowerW}
                   onChange={e => updateGroup('inverter', 'continuousPowerW', e.target.value)} />
-                <TextField path="inverter.surgePowerW" placeholder="Surge power (W) — optional" value={form.inverter.surgePowerW}
+                <TextField path="inverter.surgePowerW" label="Surge power (W)" value={form.inverter.surgePowerW}
                   onChange={e => updateGroup('inverter', 'surgePowerW', e.target.value)} />
                 <div className="col-span-2">
-                  <input placeholder="Comm protocols (e.g. CAN, RS485) — optional" value={form.inverter.commProtocols}
+                  <label className="block text-xs text-gray-500 mb-1">Comm protocols <span className="text-gray-300">— optional</span></label>
+                  <input placeholder="e.g. CAN, RS485" value={form.inverter.commProtocols}
                     onChange={e => updateGroup('inverter', 'commProtocols', e.target.value)}
                     className={`w-full ${fieldClass('inverter.commProtocols')}`} />
                 </div>
-                <TextField path="inverter.mpptMinVoltageV" placeholder="MPPT min voltage (V) — optional" value={form.inverter.mpptMinVoltageV}
+                <TextField path="inverter.mpptMinVoltageV" label="MPPT min voltage (V)" value={form.inverter.mpptMinVoltageV}
                   onChange={e => updateGroup('inverter', 'mpptMinVoltageV', e.target.value)} />
-                <TextField path="inverter.mpptMaxVoltageV" placeholder="MPPT max voltage (V) — optional" value={form.inverter.mpptMaxVoltageV}
+                <TextField path="inverter.mpptMaxVoltageV" label="MPPT max voltage (V)" value={form.inverter.mpptMaxVoltageV}
                   onChange={e => updateGroup('inverter', 'mpptMaxVoltageV', e.target.value)} />
-                <TextField path="inverter.maxInputVoltageV" placeholder="Absolute max DC input (V) — optional" value={form.inverter.maxInputVoltageV}
+                <TextField path="inverter.maxInputVoltageV" label="Absolute max DC input (V)" value={form.inverter.maxInputVoltageV}
                   onChange={e => updateGroup('inverter', 'maxInputVoltageV', e.target.value)} />
               </div>
               <p className="text-[11px] text-gray-400 mt-1">MPPT window + max input voltage (above) plus the Electrical section's Max Current are what let RhiPower check a chosen panel is compatible with this inverter's MPPT input.</p>
@@ -483,15 +495,15 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
             <div>
               <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Battery Specs</div>
               <div className="grid grid-cols-3 gap-2">
-                <TextField path="battery.cycleLife" placeholder="Cycle life — optional" value={form.battery.cycleLife}
+                <TextField path="battery.cycleLife" label="Cycle life" value={form.battery.cycleLife}
                   onChange={e => updateGroup('battery', 'cycleLife', e.target.value)} />
-                <TextField path="battery.dodPct" placeholder="DoD (%) — optional" value={form.battery.dodPct}
+                <TextField path="battery.dodPct" label="Depth of discharge (%)" value={form.battery.dodPct}
                   onChange={e => updateGroup('battery', 'dodPct', e.target.value)} />
-                <TextField path="battery.warrantyYears" placeholder="Warranty (yr) — optional" value={form.battery.warrantyYears}
+                <TextField path="battery.warrantyYears" label="Warranty (yr)" value={form.battery.warrantyYears}
                   onChange={e => updateGroup('battery', 'warrantyYears', e.target.value)} />
                 <SelectField path="battery.chemistryType" label="Chemistry" value={form.battery.chemistryType}
                   onChange={e => updateGroup('battery', 'chemistryType', e.target.value)} options={CHEMISTRY_TYPE_OPTIONS} />
-                <TextField path="battery.maxChargeRateC" placeholder="Max charge rate (C) — optional" value={form.battery.maxChargeRateC}
+                <TextField path="battery.maxChargeRateC" label="Max charge rate (C)" value={form.battery.maxChargeRateC}
                   onChange={e => updateGroup('battery', 'maxChargeRateC', e.target.value)} />
               </div>
             </div>
@@ -533,25 +545,36 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
       {isEdit && (
         <div className="pt-2 border-t border-gray-100 space-y-2">
           <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Stock & Supply</div>
-          <div className="flex gap-2 items-center flex-wrap">
-            <input placeholder="Stock qty" type="number" value={form.stockQty}
-              onChange={e => updateTop('stockQty', e.target.value)}
-              className="w-28 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
-            <span className="text-xs text-gray-400">reorder at</span>
-            <input placeholder="—" type="number" value={form.reorderPoint}
-              onChange={e => updateTop('reorderPoint', e.target.value)}
-              className="w-24 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
-            <label className="flex items-center gap-1.5 text-sm text-gray-600 ml-auto">
+          <div className="flex gap-2 items-end flex-wrap">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Stock qty</label>
+              <input type="number" value={form.stockQty}
+                onChange={e => updateTop('stockQty', e.target.value)}
+                className="w-28 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Reorder at</label>
+              <input placeholder="—" type="number" value={form.reorderPoint}
+                onChange={e => updateTop('reorderPoint', e.target.value)}
+                className="w-24 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
+            </div>
+            <label className="flex items-center gap-1.5 text-sm text-gray-600 ml-auto pb-1.5">
               <input type="checkbox" checked={form.inStock} onChange={e => updateTop('inStock', e.target.checked)} className="w-4 h-4" />
               In stock (orderable)
             </label>
           </div>
-          <input placeholder="Supplier name" value={form.supplier}
-            onChange={e => updateTop('supplier', e.target.value)}
-            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
-          <input placeholder="Reason for quantity change (optional)" value={form.reason}
-            onChange={e => updateTop('reason', e.target.value)}
-            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Supplier name</label>
+            <input value={form.supplier}
+              onChange={e => updateTop('supplier', e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Reason for quantity change <span className="text-gray-300">— optional</span></label>
+            <input value={form.reason}
+              onChange={e => updateTop('reason', e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400" />
+          </div>
         </div>
       )}
 
