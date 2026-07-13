@@ -23,14 +23,40 @@ const STATUS_OPTIONS = [
 ]
 const STATUS_MAP = Object.fromEntries(STATUS_OPTIONS.map(s => [s.value, s]))
 
-function blankLine() { return { role_key: '', qty_ordered: '1', unit_cost_kes: '' } }
+function blankLine(business) {
+  return {
+    role_key: '', qty_ordered: '1', unit_cost_kes: '',
+    // Invoice calculator (optional, per line) — a supplier invoice line is
+    // usually a bulk total (qty × unit price, minus any negotiated discount,
+    // possibly VAT-inclusive), not a clean per-unit ex-VAT cost. These fields
+    // let an admin type exactly what's printed on the invoice and derive the
+    // correct unit_cost_kes instead of hand-calculating it.
+    useCalculator: false,
+    invoiceAmount: '',
+    discountPct:   '',
+    vatInclusive:  business?.vatPricingMode === 'inclusive',
+  }
+}
 
-function NewPOForm({ suppliers, items, onSave, onCancel, saving }) {
+// Ex-VAT, net-of-discount cost per unit from what's actually printed on a
+// supplier invoice line (a lump total for `qty_ordered` units).
+function computeUnitCostFromInvoice(line, business) {
+  const amount = parseFloat(line.invoiceAmount)
+  const qty    = parseFloat(line.qty_ordered)
+  if (!amount || !qty) return null
+  const discountPct  = parseFloat(line.discountPct) || 0
+  const afterDiscount = amount * (1 - discountPct / 100)
+  const vatRate       = (business?.vatRatePct ?? 16) / 100
+  const exVat          = line.vatInclusive ? afterDiscount / (1 + vatRate) : afterDiscount
+  return exVat / qty
+}
+
+function NewPOForm({ suppliers, items, business, onSave, onCancel, saving }) {
   const [supplierId, setSupplierId] = useState(suppliers[0]?.id || '')
   const [orderDate,  setOrderDate]  = useState(() => new Date().toISOString().slice(0, 10))
   const [expected,   setExpected]   = useState('')
   const [notes,      setNotes]      = useState('')
-  const [lines,      setLines]      = useState([blankLine()])
+  const [lines,      setLines]      = useState([blankLine(business)])
 
   function updateLine(i, field, value) {
     setLines(ls => ls.map((l, idx) => {
@@ -40,10 +66,17 @@ function NewPOForm({ suppliers, items, onSave, onCancel, saving }) {
       if (field === 'role_key' && !l.unit_cost_kes && items[value]) {
         next.unit_cost_kes = String(items[value].buying_price_kes || '')
       }
+      // Calculator fields drive unit_cost_kes automatically while the
+      // calculator is on — still directly editable if toggled off.
+      const calcFields = ['invoiceAmount', 'discountPct', 'vatInclusive', 'qty_ordered']
+      if (next.useCalculator && calcFields.includes(field)) {
+        const computed = computeUnitCostFromInvoice(next, business)
+        if (computed != null) next.unit_cost_kes = String(Math.round(computed * 100) / 100)
+      }
       return next
     }))
   }
-  function addLine()    { setLines(ls => [...ls, blankLine()]) }
+  function addLine()    { setLines(ls => [...ls, blankLine(business)]) }
   function removeLine(i){ setLines(ls => ls.filter((_, idx) => idx !== i)) }
 
   const validLines = lines.filter(l => l.role_key && Number(l.qty_ordered) > 0 && Number(l.unit_cost_kes) >= 0)
@@ -67,21 +100,47 @@ function NewPOForm({ suppliers, items, onSave, onCancel, saving }) {
 
       <div className="space-y-1.5">
         {lines.map((l, i) => (
-          <div key={i} className="flex gap-2 items-center">
-            <select value={l.role_key} onChange={e => updateLine(i, 'role_key', e.target.value)}
-              className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white">
-              <option value="">Select item…</option>
-              {activeItems.map(r => (
-                <option key={r.role_key} value={r.role_key}>#{r.item_code ?? '—'} · {r.description}</option>
-              ))}
-            </select>
-            <input type="number" placeholder="Qty" value={l.qty_ordered}
-              onChange={e => updateLine(i, 'qty_ordered', e.target.value)}
-              className="w-20 border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
-            <input type="number" placeholder="Unit cost" value={l.unit_cost_kes}
-              onChange={e => updateLine(i, 'unit_cost_kes', e.target.value)}
-              className="w-28 border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
-            <button onClick={() => removeLine(i)} className="text-gray-400 hover:text-red-600 text-sm px-1">✕</button>
+          <div key={i} className="bg-white rounded-lg p-2 space-y-1.5">
+            <div className="flex gap-2 items-center">
+              <select value={l.role_key} onChange={e => updateLine(i, 'role_key', e.target.value)}
+                className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white">
+                <option value="">Select item…</option>
+                {activeItems.map(r => (
+                  <option key={r.role_key} value={r.role_key}>#{r.item_code ?? '—'} · {r.description}</option>
+                ))}
+              </select>
+              <input type="number" placeholder="Qty" value={l.qty_ordered}
+                onChange={e => updateLine(i, 'qty_ordered', e.target.value)}
+                className="w-20 border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
+              <input type="number" placeholder="Unit cost" value={l.unit_cost_kes} disabled={l.useCalculator}
+                onChange={e => updateLine(i, 'unit_cost_kes', e.target.value)}
+                className={`w-28 border rounded-lg px-2 py-1.5 text-sm ${l.useCalculator ? 'bg-gray-50 text-gray-500 border-gray-100' : 'border-gray-200'}`} />
+              <button onClick={() => updateLine(i, 'useCalculator', !l.useCalculator)}
+                className={`text-xs font-bold px-2 py-1.5 rounded-lg transition whitespace-nowrap ${l.useCalculator ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                🧮 Invoice
+              </button>
+              <button onClick={() => removeLine(i)} className="text-gray-400 hover:text-red-600 text-sm px-1">✕</button>
+            </div>
+            {l.useCalculator && (
+              <div className="flex gap-2 items-center pl-1 flex-wrap">
+                <span className="text-xs text-gray-400">This line's invoice total:</span>
+                <input type="number" placeholder="Invoice amount (Ksh)" value={l.invoiceAmount}
+                  onChange={e => updateLine(i, 'invoiceAmount', e.target.value)}
+                  className="w-36 border border-gray-200 rounded-lg px-2 py-1 text-xs" />
+                <span className="text-xs text-gray-400">less discount</span>
+                <input type="number" placeholder="0" value={l.discountPct}
+                  onChange={e => updateLine(i, 'discountPct', e.target.value)}
+                  className="w-16 border border-gray-200 rounded-lg px-2 py-1 text-xs" />
+                <span className="text-xs text-gray-400">%</span>
+                <label className="flex items-center gap-1 text-xs text-gray-500 ml-1">
+                  <input type="checkbox" checked={l.vatInclusive} onChange={e => updateLine(i, 'vatInclusive', e.target.checked)} className="w-3.5 h-3.5" />
+                  VAT-inclusive ({business?.vatRatePct ?? 16}%)
+                </label>
+                <span className="text-xs text-gray-400 ml-auto">
+                  → {l.qty_ordered || '?'} pcs at <strong className="text-gray-700">{l.unit_cost_kes ? formatKsh(l.unit_cost_kes) : '—'}</strong>/unit ex-VAT
+                </span>
+              </div>
+            )}
           </div>
         ))}
         <button onClick={addLine} className="text-xs font-bold text-blue-600 hover:text-blue-800">+ Add line</button>
@@ -111,6 +170,11 @@ function ReceiveLineRow({ po, line, item, session, business, onReceived }) {
   const [qty, setQty] = useState(String(remaining))
   const [busy, setBusy] = useState(false)
   const [billError, setBillError] = useState('')
+  // Buying price drives selling price everywhere (calculator.js / Admin
+  // inventory list) — defaults to ON so receiving real invoice-based stock
+  // actually updates what customers get quoted, not just the accounting-
+  // only weighted_avg_cost_kes. Admin can uncheck to leave it untouched.
+  const [syncBuyingPrice, setSyncBuyingPrice] = useState(true)
   const canReceive = ['ordered', 'partially_received'].includes(po.status) && remaining > 0
 
   async function receive() {
@@ -131,8 +195,10 @@ function ReceiveLineRow({ po, line, item, session, business, onReceived }) {
       const newAvg = (oldAvg != null && oldStock > 0)
         ? Math.round(((oldAvg * oldStock) + (unitCost * n)) / newStock)
         : unitCost
+      const itemUpdate = { stock_qty: newStock, weighted_avg_cost_kes: newAvg, updated_at: new Date().toISOString() }
+      if (syncBuyingPrice) itemUpdate.buying_price_kes = newAvg
       await supabase.from('inventory_prices')
-        .update({ stock_qty: newStock, weighted_avg_cost_kes: newAvg, updated_at: new Date().toISOString() })
+        .update(itemUpdate)
         .eq('role_key', line.role_key)
       await logStockMovement({
         roleKey: line.role_key, quantityChanged: n, session,
@@ -148,7 +214,7 @@ function ReceiveLineRow({ po, line, item, session, business, onReceived }) {
       } catch (billErr) {
         setBillError(billErr.message || 'Stock received, but the vendor bill/ledger posting failed — check Vendor Bills manually.')
       }
-      onReceived({ lineId: line.id, qtyReceived: newQtyReceived, roleKey: line.role_key, newStock, newAvg })
+      onReceived({ lineId: line.id, qtyReceived: newQtyReceived, roleKey: line.role_key, newStock, newAvg, newBuyingPrice: syncBuyingPrice ? newAvg : null })
     }
     setBusy(false)
   }
@@ -161,13 +227,19 @@ function ReceiveLineRow({ po, line, item, session, business, onReceived }) {
           <div className="text-xs text-gray-400">Ordered {line.qty_ordered} · Received {line.qty_received} · {formatKsh(line.unit_cost_kes)}/unit</div>
         </div>
         {canReceive ? (
-          <div className="flex items-center gap-1 shrink-0">
-            <input type="number" value={qty} onChange={e => setQty(e.target.value)}
-              className="w-16 border-2 border-blue-400 rounded-lg px-2 py-1 text-xs font-mono outline-none" />
-            <button onClick={receive} disabled={busy}
-              className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold px-2 py-1 rounded-lg transition disabled:opacity-50">
-              {busy ? '…' : 'Receive'}
-            </button>
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            <div className="flex items-center gap-1">
+              <input type="number" value={qty} onChange={e => setQty(e.target.value)}
+                className="w-16 border-2 border-blue-400 rounded-lg px-2 py-1 text-xs font-mono outline-none" />
+              <button onClick={receive} disabled={busy}
+                className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold px-2 py-1 rounded-lg transition disabled:opacity-50">
+                {busy ? '…' : 'Receive'}
+              </button>
+            </div>
+            <label className="flex items-center gap-1 text-[10px] text-gray-400 whitespace-nowrap">
+              <input type="checkbox" checked={syncBuyingPrice} onChange={e => setSyncBuyingPrice(e.target.checked)} className="w-3 h-3" />
+              Update buying price too
+            </label>
           </div>
         ) : (
           <span className="text-xs text-gray-400 shrink-0">{remaining === 0 ? '✓ Fully received' : '—'}</span>
@@ -240,8 +312,14 @@ export default function AdminPurchaseOrders({ session, business = BUSINESS_FALLB
     logAdminAction(session, 'po_status_change', po.id, { status })
   }
 
-  function handleLineReceived(po, { lineId, qtyReceived, roleKey, newStock, newAvg }) {
-    setItems(p => ({ ...p, [roleKey]: { ...p[roleKey], stock_qty: newStock, weighted_avg_cost_kes: newAvg } }))
+  function handleLineReceived(po, { lineId, qtyReceived, roleKey, newStock, newAvg, newBuyingPrice }) {
+    setItems(p => ({
+      ...p,
+      [roleKey]: {
+        ...p[roleKey], stock_qty: newStock, weighted_avg_cost_kes: newAvg,
+        ...(newBuyingPrice != null ? { buying_price_kes: newBuyingPrice } : {}),
+      },
+    }))
     setPos(p => p.map(x => {
       if (x.id !== po.id) return x
       const lines = x.purchase_order_lines.map(l => l.id === lineId ? { ...l, qty_received: qtyReceived } : l)
@@ -288,7 +366,7 @@ export default function AdminPurchaseOrders({ session, business = BUSINESS_FALLB
       </div>
 
       {creating && (
-        <NewPOForm suppliers={activeSuppliers} items={items} onSave={createPO} onCancel={() => setCreating(false)} saving={saving} />
+        <NewPOForm suppliers={activeSuppliers} items={items} business={business} onSave={createPO} onCancel={() => setCreating(false)} saving={saving} />
       )}
 
       {filtered.length === 0 ? (
