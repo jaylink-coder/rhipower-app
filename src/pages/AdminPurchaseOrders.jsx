@@ -256,7 +256,7 @@ function ReceiveLineRow({ po, line, item, session, business, onReceived }) {
   )
 }
 
-export default function AdminPurchaseOrders({ session, business = BUSINESS_FALLBACK }) {
+export default function AdminPurchaseOrders({ session, business = BUSINESS_FALLBACK, focusId }) {
   const [pos,       setPos]       = useState([])
   const [suppliers, setSuppliers] = useState([])
   const [items,     setItems]     = useState({})
@@ -267,6 +267,9 @@ export default function AdminPurchaseOrders({ session, business = BUSINESS_FALLB
   const [saving,    setSaving]    = useState(false)
 
   useEffect(() => { load() }, [])
+  // Jumped here from a supplier's detail modal ("view this PO") — expand it
+  // directly instead of leaving the admin to hunt through the list.
+  useEffect(() => { if (focusId && pos.some(p => p.id === focusId)) setExpanded(focusId) }, [focusId, pos])
 
   async function load() {
     setLoading(true)

@@ -146,7 +146,7 @@ function RecordSupplierPaymentForm({ bill, session, onRecorded }) {
   )
 }
 
-export default function AdminVendorBills({ session }) {
+export default function AdminVendorBills({ session, focusId }) {
   const [bills, setBills] = useState([])
   const [suppliers, setSuppliers] = useState([])
   const [paymentsByBill, setPaymentsByBill] = useState({})
@@ -160,6 +160,9 @@ export default function AdminVendorBills({ session }) {
   const [confirmingVoid, setConfirmingVoid] = useState(null)
 
   useEffect(() => { load() }, [])
+  // Jumped here from a supplier's detail modal ("view this bill") — expand
+  // it directly instead of leaving the admin to hunt through the list.
+  useEffect(() => { if (focusId && bills.some(b => b.id === focusId)) setExpanded(focusId) }, [focusId, bills])
 
   async function load() {
     setLoading(true)

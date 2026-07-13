@@ -38,7 +38,13 @@ function sectionHeading(doc, text, y) {
 }
 
 // entries: [{ date, description, debit, credit, balance }], oldest first.
-export function generateStatementPDF({ customer, entries, openingBalance, closingBalance, rangeLabel, business = BUSINESS_FALLBACK }) {
+// `party`/`partyLabel`/`docTitle` default to the original customer (AR)
+// statement wording — pass partyLabel: 'Supplier', docTitle: 'SUPPLIER
+// STATEMENT' for an accounts-payable statement instead (see AdminSuppliers.jsx).
+export function generateStatementPDF({
+  customer, entries, openingBalance, closingBalance, rangeLabel, business = BUSINESS_FALLBACK,
+  party = customer, partyLabel = 'Customer', docTitle = 'CUSTOMER STATEMENT',
+}) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
 
@@ -55,21 +61,21 @@ export function generateStatementPDF({ customer, entries, openingBalance, closin
 
   doc.setFontSize(10)
   doc.setTextColor(255, 220, 150)
-  doc.text('CUSTOMER STATEMENT', pageW - 14, 15, { align: 'right' })
+  doc.text(docTitle, pageW - 14, 15, { align: 'right' })
   doc.setTextColor(255, 255, 255)
   doc.setFontSize(8)
   doc.text(rangeLabel, pageW - 14, 22, { align: 'right' })
   doc.text(new Date().toLocaleDateString('en-KE', { year: 'numeric', month: 'long', day: 'numeric' }), pageW - 14, 27.5, { align: 'right' })
 
   let y = 42
-  y = sectionHeading(doc, 'Customer', y)
+  y = sectionHeading(doc, partyLabel, y)
   autoTable(doc, {
     startY: y,
     theme: 'plain',
     styles: { fontSize: 9, cellPadding: 1 },
     body: [
-      ['Name', customer.name || '—', 'Opening Balance', money(openingBalance)],
-      ['Phone', customer.phone || '—', 'Closing Balance', money(closingBalance)],
+      ['Name', party.name || '—', 'Opening Balance', money(openingBalance)],
+      ['Phone', party.phone || '—', 'Closing Balance', money(closingBalance)],
     ],
     columnStyles: { 0: { fontStyle: 'bold', textColor: GRAY, cellWidth: 32 }, 2: { fontStyle: 'bold', textColor: GRAY, cellWidth: 34 } },
     margin: { left: 14, right: 14 },
@@ -114,6 +120,6 @@ export function generateStatementPDF({ customer, entries, openingBalance, closin
     addFooter(doc, business, p, pageCount)
   }
 
-  const safeName = String(customer.name || 'customer').replace(/[^a-z0-9]+/gi, '-')
+  const safeName = String(party.name || 'party').replace(/[^a-z0-9]+/gi, '-')
   doc.save(`RhiPower-Statement-${safeName}-${Date.now()}.pdf`)
 }

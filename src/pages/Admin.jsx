@@ -938,9 +938,9 @@ export default function Admin({ onBack }) {
           {activeTab === 'neworder'    && <AdminNewOrder session={session} onNavigate={navigateTo} />}
           {activeTab === 'leads'       && <AdminLeads session={session} onNavigate={navigateTo} focusId={focusId} business={business} />}
           {activeTab === 'inventory'   && <InventoryTable session={session} invSection={invSection} business={business} />}
-          {activeTab === 'suppliers'   && <AdminSuppliers session={session} />}
-          {activeTab === 'purchasing'  && <AdminPurchaseOrders session={session} business={business} />}
-          {activeTab === 'vendorbills' && <AdminVendorBills session={session} />}
+          {activeTab === 'suppliers'   && <AdminSuppliers session={session} onNavigate={navigateTo} business={business} />}
+          {activeTab === 'purchasing'  && <AdminPurchaseOrders session={session} business={business} focusId={focusId} />}
+          {activeTab === 'vendorbills' && <AdminVendorBills session={session} focusId={focusId} />}
           {activeTab === 'salesorders' && <AdminSalesOrders session={session} onNavigate={navigateTo} focusId={focusId} business={business} />}
           {activeTab === 'invoices'    && <AdminInvoices session={session} onNavigate={navigateTo} focusId={focusId} business={business} />}
           {activeTab === 'customers'   && <AdminCustomers session={session} onNavigate={navigateTo} business={business} />}
