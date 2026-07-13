@@ -20,6 +20,28 @@ export function formatKsh(amount) {
   return 'Ksh ' + Math.round(amount).toLocaleString('en-KE')
 }
 
+// The margin every item prices at unless it carries its own override
+// (inventory_prices.margin_pct, migration 033) — kept as one named
+// constant since it used to be a bare `* 1.35` scattered across this file
+// and Admin.jsx.
+export const DEFAULT_MARGIN_PCT = 35
+export function sellPrice(cost, marginPct) {
+  const margin = marginPct != null ? marginPct : DEFAULT_MARGIN_PCT
+  return cost * (1 + margin / 100)
+}
+
+// Per-unit selling price for a BOM line, given how many units this quote
+// needs. A wholesale tier (migration 033) is a hard cutoff, not a sliding
+// scale: below wholesaleMinQty the line prices at the normal margin: at or
+// above it, every unit in the line switches to wholesalePriceKes. Both
+// fields must be set on the item for the tier to apply at all.
+export function unitSellPrice(item, qty) {
+  if (item.wholesalePriceKes != null && item.wholesaleMinQty != null && qty >= item.wholesaleMinQty) {
+    return item.wholesalePriceKes
+  }
+  return sellPrice(item.cost, item.marginPct)
+}
+
 // `selection` lets a caller (Step3's brand/model picker) override which
 // specific product is used per category. When omitted, the cheapest product
 // within the active tier is used — same effective behaviour as before
@@ -45,7 +67,7 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
   let maxSurgeWatts     = 0
   let overnightEnergyWh = 0   // per single day
   let heavyMotorCount   = 0
-  let hardwareCostBase  = 0
+  let hardwareSellBase  = 0  // sum of unitSellPrice(item, qty) * qty — respects per-item margin/wholesale overrides
   const surgeAppliances = []  // for engineer's notes
 
   allAppliances.forEach(app => {
@@ -185,16 +207,13 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
 
   // Mounting scales with array size (Ksh/kWp); earthing/lightning protection is
   // one code-mandated kit per system regardless of size.
-  const mountingCost = truePVkW * z.zoneA[5].cost
-  const earthingCost = z.zoneA[6].cost
-
-  hardwareCostBase += panelQty    * panel.cost
-  hardwareCostBase += qtyBreaker  * z.zoneA[0].cost
-  hardwareCostBase += qtySPD      * z.zoneA[1].cost
-  hardwareCostBase += qtyFuses    * z.zoneA[2].cost
-  hardwareCostBase += cableMeters * cableSKU.cost
-  hardwareCostBase += mountingCost
-  hardwareCostBase += earthingCost
+  hardwareSellBase += panelQty    * unitSellPrice(panel, panelQty)
+  hardwareSellBase += qtyBreaker  * unitSellPrice(z.zoneA[0], qtyBreaker)
+  hardwareSellBase += qtySPD      * unitSellPrice(z.zoneA[1], qtySPD)
+  hardwareSellBase += qtyFuses    * unitSellPrice(z.zoneA[2], qtyFuses)
+  hardwareSellBase += cableMeters * unitSellPrice(cableSKU, cableMeters)
+  hardwareSellBase += truePVkW    * unitSellPrice(z.zoneA[5], truePVkW)
+  hardwareSellBase += unitSellPrice(z.zoneA[6], 1)
 
   const zoneA = [
     { qty: panelQty,                     label: panel.description,      sku: panel.sku,     roleKey: panel.roleKey,       vatStatus: panel.vatStatus || 'standard' },
@@ -211,13 +230,13 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
   const lugM10Qty = inverterQty * 2
   const batCableM = batteryQty * 4
 
-  hardwareCostBase += batteryQty  * battery.cost
-  hardwareCostBase += inverterQty * inverter.cost
-  hardwareCostBase += z.zoneB[0].cost
-  hardwareCostBase += z.zoneB[1].cost
-  hardwareCostBase += lugM8Qty  * z.zoneB[2].cost
-  hardwareCostBase += lugM10Qty * z.zoneB[3].cost
-  hardwareCostBase += batCableM * z.zoneB[4].cost
+  hardwareSellBase += batteryQty  * unitSellPrice(battery, batteryQty)
+  hardwareSellBase += inverterQty * unitSellPrice(inverter, inverterQty)
+  hardwareSellBase += unitSellPrice(z.zoneB[0], 1)
+  hardwareSellBase += unitSellPrice(z.zoneB[1], 1)
+  hardwareSellBase += lugM8Qty  * unitSellPrice(z.zoneB[2], lugM8Qty)
+  hardwareSellBase += lugM10Qty * unitSellPrice(z.zoneB[3], lugM10Qty)
+  hardwareSellBase += batCableM * unitSellPrice(z.zoneB[4], batCableM)
 
   const zoneB = [
     { qty: batteryQty,       label: battery.description,  sku: battery.sku,  roleKey: battery.roleKey,  vatStatus: battery.vatStatus  || 'standard' },
@@ -230,9 +249,9 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
   ]
 
   // 9. ZONE C BOM (AC Distribution)
-  hardwareCostBase += z.zoneC[0].cost
-  hardwareCostBase += z.zoneC[1].cost
-  if (heavyMotorCount > 0) hardwareCostBase += heavyMotorCount * z.zoneC[2].cost
+  hardwareSellBase += unitSellPrice(z.zoneC[0], 1)
+  hardwareSellBase += unitSellPrice(z.zoneC[1], 1)
+  if (heavyMotorCount > 0) hardwareSellBase += heavyMotorCount * unitSellPrice(z.zoneC[2], heavyMotorCount)
 
   const zoneC = [
     { qty: 1,              label: z.zoneC[0].description, roleKey: z.zoneC[0].roleKey, vatStatus: z.zoneC[0].vatStatus || 'standard' },
@@ -267,8 +286,10 @@ export function runCalculation(siteConfig, allAppliances, quantities, inventory 
   }
   const totalLogistics = transportCost + perDiemCost
 
-  // 12. TOTALS (35% margin on materials)
-  const materialsAtSellPrice = hardwareCostBase * 1.35
+  // 12. TOTALS — materials price per line item, respecting each item's own
+  // margin override and wholesale quantity break (migration 033) instead
+  // of one flat 35% applied to the whole hardware total.
+  const materialsAtSellPrice = hardwareSellBase
   const grandTotal           = materialsAtSellPrice + totalLabor + totalLogistics
 
   return {

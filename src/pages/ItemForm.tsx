@@ -9,6 +9,7 @@
 import { useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { supabase } from '../lib/supabase.js'
+import { formatKsh, sellPrice, DEFAULT_MARGIN_PCT } from '../lib/calculator.js'
 import { logAdminAction } from '../lib/auditLog.js'
 import { logStockMovement } from '../lib/inventory.js'
 import {
@@ -50,6 +51,9 @@ interface FormState {
   sku: string
   description: string
   buyingPriceKes: string
+  marginPct: string
+  wholesalePriceKes: string
+  wholesaleMinQty: string
   capacity: string
   unitWeightKg: string
   vatStatus: VatStatus
@@ -77,6 +81,11 @@ function specToFormState(spec: ItemSpec, editRow?: Record<string, any> | null): 
     sku: spec.sku,
     description: spec.description,
     buyingPriceKes: spec.buyingPriceKes ? String(spec.buyingPriceKes) : '',
+    // Overridden right after this call using `source` (editRow or cloneFrom) —
+    // margin/wholesale aren't part of ItemSpec/Zod, so they're not derived here.
+    marginPct: '',
+    wholesalePriceKes: '',
+    wholesaleMinQty: '',
     capacity: numToStr(spec.capacity),
     unitWeightKg: numToStr(spec.unitWeightKg),
     vatStatus: spec.vatStatus,
@@ -151,7 +160,12 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
     const source = isEdit ? editRow : cloneFrom
     const spec = flatRowToSpec(source, category)
     if (!isEdit && source) spec.sku = `${spec.sku} (copy)`
-    return specToFormState(spec, isEdit ? editRow : null)
+    return {
+      ...specToFormState(spec, isEdit ? editRow : null),
+      marginPct: numToStr(source?.margin_pct),
+      wholesalePriceKes: numToStr(source?.wholesale_price_kes),
+      wholesaleMinQty: numToStr(source?.wholesale_min_qty),
+    }
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitError, setSubmitError] = useState('')
@@ -263,6 +277,9 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
 
     setSaving(true); setSubmitError('')
     const payload = specToFlatRow(result.data, category)
+    payload.margin_pct = form.marginPct === '' ? null : parseFloat(form.marginPct)
+    payload.wholesale_price_kes = form.wholesalePriceKes === '' ? null : parseFloat(form.wholesalePriceKes)
+    payload.wholesale_min_qty = form.wholesaleMinQty === '' ? null : parseInt(form.wholesaleMinQty, 10)
 
     if (isEdit && editRow) {
       payload.stock_qty = form.stockQty === '' ? null : parseInt(form.stockQty, 10)
@@ -391,6 +408,37 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
           className={`w-full ${fieldClass('description')}`} />
         {errors.description && <p className="text-xs text-red-600 mt-0.5">{errors.description}</p>}
       </div>
+
+      <div className="pt-2 border-t border-gray-100">
+        <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Pricing</div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Margin (%) <span className="text-gray-300">— optional, {DEFAULT_MARGIN_PCT}% default</span></label>
+            <input type="number" placeholder={String(DEFAULT_MARGIN_PCT)} value={form.marginPct}
+              onChange={e => updateTop('marginPct', e.target.value)}
+              className={`w-full ${fieldClass('marginPct')}`} />
+          </div>
+          <div className="flex flex-col justify-end pb-1.5">
+            <span className="text-xs text-gray-400">
+              Sells at{' '}
+              <span className="font-bold text-emerald-700">
+                {form.buyingPriceKes
+                  ? formatKsh(sellPrice(parseFloat(form.buyingPriceKes) || 0, form.marginPct === '' ? null : parseFloat(form.marginPct)))
+                  : '—'}
+              </span>
+              {form.marginPct === '' ? ` (${DEFAULT_MARGIN_PCT}% default)` : ` (${form.marginPct}% margin)`}
+            </span>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 mt-2">
+          <TextField path="wholesalePriceKes" label="Wholesale price (Ksh)" value={form.wholesalePriceKes}
+            onChange={e => updateTop('wholesalePriceKes', e.target.value)} />
+          <TextField path="wholesaleMinQty" label="Min qty to unlock wholesale" value={form.wholesaleMinQty}
+            onChange={e => updateTop('wholesaleMinQty', e.target.value)} />
+        </div>
+        <p className="text-[11px] text-gray-400 mt-1">Set both wholesale fields together to give this item a bulk-quantity floor — a customer buying at least that many pieces pays the wholesale price instead of the margin price, in both quotes and this inventory list. Leave both blank for normal margin-only pricing.</p>
+      </div>
+
       <div className="grid grid-cols-2 gap-2">
         {meta && (
           <TextField path="capacity" label={`${meta.capacityLabel} (${meta.capacityUnit})`} disabled={specsLocked}

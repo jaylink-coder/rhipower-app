@@ -617,7 +617,7 @@ export default function Step3_Results({
             </h4>
             <div className="space-y-3 text-sm font-mono">
               {[
-                { label: 'Hardware (materials + 35% margin):',           val: fmt.materials },
+                { label: 'Hardware (materials at selling price):',       val: fmt.materials },
                 { label: `Engineering & installation labor:`,             val: fmt.labor     },
                 { label: `Logistics & per-diem (${siteConfig.siteKm} km):`, val: fmt.logistics },
               ].map(r => (

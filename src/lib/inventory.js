@@ -13,6 +13,9 @@ export function toProduct(row) {
     sku:              row.sku,
     description:      row.description,
     cost:             Number(row.buying_price_kes),
+    marginPct:        row.margin_pct != null ? Number(row.margin_pct) : undefined,
+    wholesalePriceKes: row.wholesale_price_kes != null ? Number(row.wholesale_price_kes) : undefined,
+    wholesaleMinQty:  row.wholesale_min_qty != null ? Number(row.wholesale_min_qty) : undefined,
     wattsEach:        row.watts_each     != null ? Number(row.watts_each)     : undefined,
     kwhEach:          row.kwh_each       != null ? Number(row.kwh_each)       : undefined,
     kwEach:           row.kw_each        != null ? Number(row.kw_each)        : undefined,
@@ -106,7 +109,12 @@ export async function fetchInventory() {
       const r = byKey[key]
       const base = { ...def, roleKey: key, vatStatus: def.vatStatus || 'standard' }
       if (!r) return base
-      return { ...base, sku: r.sku, description: r.description, cost: Number(r.buying_price_kes), vatStatus: r.vat_status || 'standard' }
+      return {
+        ...base, sku: r.sku, description: r.description, cost: Number(r.buying_price_kes), vatStatus: r.vat_status || 'standard',
+        marginPct:        r.margin_pct != null ? Number(r.margin_pct) : undefined,
+        wholesalePriceKes: r.wholesale_price_kes != null ? Number(r.wholesale_price_kes) : undefined,
+        wholesaleMinQty:  r.wholesale_min_qty != null ? Number(r.wholesale_min_qty) : undefined,
+      }
     }
 
     // Any number of products per category — tier is derived from price, not

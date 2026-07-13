@@ -1,6 +1,6 @@
 import { useState, useEffect, Fragment } from 'react'
 import { supabase } from '../lib/supabase.js'
-import { formatKsh } from '../lib/calculator.js'
+import { formatKsh, sellPrice } from '../lib/calculator.js'
 import { DEFAULT_PRICE_BANDS } from '../data/skuInventory.js'
 import AdminHome from './AdminHome.jsx'
 import AdminLeads from './AdminLeads.jsx'
@@ -445,7 +445,10 @@ function ItemDetailModal({ row, category, onClose, onChanged, onCloneRequested, 
               {meta && <div className="flex justify-between"><span className="text-gray-400">{meta.capacityLabel}</span><span className="font-bold">{row[meta.capacityField] != null ? `${row[meta.capacityField]}${meta.capacityUnit}` : '—'}</span></div>}
               <div className="flex justify-between"><span className="text-gray-400">Weight</span><span className="font-bold">{row.unit_weight_kg != null ? `${row.unit_weight_kg} kg` : '—'}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Buying price</span><span className="font-bold">{formatKsh(row.buying_price_kes)}</span></div>
-              <div className="flex justify-between"><span className="text-gray-400">Selling price</span><span className="font-bold text-emerald-700">{formatKsh(row.buying_price_kes * 1.35)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-400">Selling price{row.margin_pct != null ? ` (${row.margin_pct}% margin)` : ' (35% default margin)'}</span><span className="font-bold text-emerald-700">{formatKsh(sellPrice(Number(row.buying_price_kes), row.margin_pct))}</span></div>
+              {row.wholesale_price_kes != null && row.wholesale_min_qty != null && (
+                <div className="flex justify-between"><span className="text-gray-400">Wholesale (at ≥{row.wholesale_min_qty} pcs)</span><span className="font-bold text-blue-700">{formatKsh(row.wholesale_price_kes)}</span></div>
+              )}
               <div className="flex justify-between"><span className="text-gray-400">Stock on hand</span><span className="font-bold">{row.stock_qty ?? 'Not tracked'}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Reorder point</span><span className="font-bold">{row.reorder_point ?? '—'}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Supplier</span><span className="font-bold">{row.supplier || '—'}</span></div>
@@ -673,7 +676,7 @@ function InventoryTable({ session, invSection }) {
                 {group.items.map(item => {
                   const row     = rows[item.key] || {}
                   const buying  = Number(row.buying_price_kes || 0)
-                  const selling = Math.round(buying * 1.35)
+                  const selling = Math.round(sellPrice(buying, row.margin_pct))
                   const inStock = row.in_stock !== false
                   const updated = row.updated_at
                     ? new Date(row.updated_at).toLocaleDateString('en-KE', { day:'2-digit', month:'short' })
@@ -714,6 +717,9 @@ function InventoryTable({ session, invSection }) {
                       <td className="px-4 py-3 text-right font-mono font-bold text-gray-800 tabular-nums">{formatKsh(buying)}</td>
                       <td className="px-4 py-3 text-right font-mono font-semibold text-emerald-700 tabular-nums">
                         {formatKsh(selling)}
+                        {row.wholesale_price_kes != null && row.wholesale_min_qty != null && (
+                          <div className="text-[10px] font-sans font-normal text-blue-500 normal-case">{formatKsh(row.wholesale_price_kes)} at ≥{row.wholesale_min_qty}</div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <span className={`text-xs font-bold px-2 py-1 rounded-full ${inStock ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'}`}>
