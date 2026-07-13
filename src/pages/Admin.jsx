@@ -542,7 +542,7 @@ function getTierBadge(category, price, priceBands) {
 }
 
 // ── Inventory table (headless — header/sub-nav live in the outer panel's top bar) ──
-function InventoryTable({ session, invSection }) {
+function InventoryTable({ session, invSection, business }) {
   const [rows,       setRows]       = useState({})
   const [priceBands, setPriceBands] = useState(defaultBandsAsRows)
   const [loading, setLoading] = useState(true)
@@ -612,7 +612,7 @@ function InventoryTable({ session, invSection }) {
         <h2 className="text-lg font-black text-gray-800">
           {formState.mode === 'edit' ? `Edit Item: ${formState.editRow.description}` : 'Add New Item'}
         </h2>
-        <ItemForm category={formState.category} mode={formState.mode} session={session}
+        <ItemForm category={formState.category} mode={formState.mode} session={session} business={business}
           editRow={formState.editRow} cloneFrom={formState.cloneFrom}
           onCancel={() => setFormState(null)}
           onSaved={row => { setRows(p => ({ ...p, [row.role_key]: row })); setFormState(null) }} />
@@ -937,7 +937,7 @@ export default function Admin({ onBack }) {
           {activeTab === 'home'        && <AdminHome session={session} onNavigate={navigateTo} />}
           {activeTab === 'neworder'    && <AdminNewOrder session={session} onNavigate={navigateTo} />}
           {activeTab === 'leads'       && <AdminLeads session={session} onNavigate={navigateTo} focusId={focusId} business={business} />}
-          {activeTab === 'inventory'   && <InventoryTable session={session} invSection={invSection} />}
+          {activeTab === 'inventory'   && <InventoryTable session={session} invSection={invSection} business={business} />}
           {activeTab === 'suppliers'   && <AdminSuppliers session={session} />}
           {activeTab === 'purchasing'  && <AdminPurchaseOrders session={session} business={business} />}
           {activeTab === 'vendorbills' && <AdminVendorBills session={session} />}

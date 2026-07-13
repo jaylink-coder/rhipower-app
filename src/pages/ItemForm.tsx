@@ -6,7 +6,7 @@
 // enum) before it reaches Supabase, which matters more here than almost
 // anywhere else in the app since there's no human code reviewer checking
 // each admin submission by hand.
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { ChangeEvent } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { formatKsh, sellPrice, DEFAULT_MARGIN_PCT } from '../lib/calculator.js'
@@ -149,9 +149,10 @@ interface ItemFormProps {
   onSaved: (row: Record<string, any>) => void
   onCancel?: () => void
   session: any
+  business?: { vatRatePct?: number; vatPricingMode?: 'inclusive' | 'exclusive' } | null
 }
 
-export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, onCancel, session }: ItemFormProps) {
+export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, onCancel, session, business }: ItemFormProps) {
   const meta = CATEGORY_META[category] || null
   const isEdit = mode === 'edit'
   const isProductCategory = category === 'panel' || category === 'inverter' || category === 'battery'
@@ -170,6 +171,31 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitError, setSubmitError] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // Invoice calculator — this is the ONE place buying price gets set, so
+  // it's the right place to reconcile a real supplier invoice (which is
+  // usually a bulk/discounted, maybe-VAT-inclusive total) into a clean
+  // per-unit ex-VAT cost, rather than duplicating that math anywhere else
+  // (a Purchase Order is created before any real invoice exists, and
+  // receiving one just records the movement — see AdminPurchaseOrders.jsx).
+  const [useInvoiceCalc, setUseInvoiceCalc] = useState(false)
+  const [invoiceAmount, setInvoiceAmount] = useState('')
+  const [invoiceQty,    setInvoiceQty]    = useState('1')
+  const [discountPct,   setDiscountPct]   = useState('')
+  const [vatInclusive,  setVatInclusive]  = useState(business?.vatPricingMode === 'inclusive')
+
+  useEffect(() => {
+    if (!useInvoiceCalc) return
+    const amount = parseFloat(invoiceAmount)
+    const qty    = parseFloat(invoiceQty)
+    if (!amount || !qty) return
+    const discount     = parseFloat(discountPct) || 0
+    const afterDiscount = amount * (1 - discount / 100)
+    const vatRate        = (business?.vatRatePct ?? 16) / 100
+    const exVat            = vatInclusive ? afterDiscount / (1 + vatRate) : afterDiscount
+    updateTop('buyingPriceKes', String(Math.round((exVat / qty) * 100) / 100))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useInvoiceCalc, invoiceAmount, invoiceQty, discountPct, vatInclusive])
 
   // Specs sourced from a real manufacturer datasheet (see migration 032)
   // are locked against casual retyping — an admin has to deliberately hit
@@ -394,13 +420,44 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
           {errors.sku && <p className="text-xs text-red-600 mt-0.5">{errors.sku}</p>}
         </div>
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Buying price (Ksh) *</label>
-          <input type="number" value={form.buyingPriceKes}
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-xs text-gray-500">Buying price (Ksh) *</label>
+            <button type="button" onClick={() => setUseInvoiceCalc(c => !c)}
+              className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition ${useInvoiceCalc ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+              🧮 From invoice
+            </button>
+          </div>
+          <input type="number" value={form.buyingPriceKes} disabled={useInvoiceCalc}
             onChange={e => updateTop('buyingPriceKes', e.target.value)} onBlur={() => handleBlur('buyingPriceKes')}
-            className={`w-full ${fieldClass('buyingPriceKes')}`} />
+            className={`w-full ${fieldClass('buyingPriceKes', useInvoiceCalc)}`} />
           {errors.buyingPriceKes && <p className="text-xs text-red-600 mt-0.5">{errors.buyingPriceKes}</p>}
         </div>
       </div>
+
+      {useInvoiceCalc && (
+        <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 space-y-1.5">
+          <div className="text-[11px] font-bold text-blue-800 uppercase tracking-wider">Invoice → buying price</div>
+          <div className="flex gap-2 items-center flex-wrap">
+            <span className="text-xs text-gray-500">Invoice amount for</span>
+            <input type="number" value={invoiceQty} onChange={e => setInvoiceQty(e.target.value)}
+              className="w-16 border border-blue-200 rounded-lg px-2 py-1 text-xs" />
+            <span className="text-xs text-gray-500">pcs</span>
+            <input type="number" placeholder="Ksh" value={invoiceAmount} onChange={e => setInvoiceAmount(e.target.value)}
+              className="w-32 border border-blue-200 rounded-lg px-2 py-1 text-xs" />
+            <span className="text-xs text-gray-500">less discount</span>
+            <input type="number" placeholder="0" value={discountPct} onChange={e => setDiscountPct(e.target.value)}
+              className="w-14 border border-blue-200 rounded-lg px-2 py-1 text-xs" />
+            <span className="text-xs text-gray-500">%</span>
+            <label className="flex items-center gap-1 text-xs text-gray-600 ml-1">
+              <input type="checkbox" checked={vatInclusive} onChange={e => setVatInclusive(e.target.checked)} className="w-3.5 h-3.5" />
+              VAT-inclusive ({business?.vatRatePct ?? 16}%)
+            </label>
+          </div>
+          <p className="text-[11px] text-gray-500">
+            → {invoiceQty || '?'} pcs at <strong className="text-gray-800">{form.buyingPriceKes ? formatKsh(form.buyingPriceKes) : '—'}</strong>/unit ex-VAT, net of discount — this is what gets saved as Buying price.
+          </p>
+        </div>
+      )}
       <div>
         <label className="block text-xs text-gray-500 mb-1">Description *</label>
         <input placeholder="Full description, shown to customers" value={form.description}
