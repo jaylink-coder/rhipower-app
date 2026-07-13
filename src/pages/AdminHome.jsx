@@ -121,7 +121,7 @@ export default function AdminHome({ session, onNavigate }) {
       const products = (invRes.data || []).filter(r => r.is_active !== false)
       const low = products.filter(r => r.stock_qty != null && r.reorder_point != null && r.stock_qty <= r.reorder_point)
 
-      const openPOs = (poRes.data || []).filter(p => ['draft', 'ordered', 'partially_received'].includes(p.status)).length
+      const openPOs = (poRes.data || []).filter(p => ['draft', 'sent', 'accepted', 'delivered', 'partially_received'].includes(p.status)).length
       const openSOs = (soRes.data || []).filter(s => ['draft', 'confirmed', 'partially_fulfilled'].includes(s.status)).length
       const invoicesAll = invoicesRes.data || []
       const unpaidInvoices = invoicesAll.filter(i => ['sent', 'partially_paid', 'overdue'].includes(i.status))

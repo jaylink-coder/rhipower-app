@@ -14,14 +14,75 @@ import { formatDocNumber } from '../lib/docNumbers.js'
 import { FALLBACK as BUSINESS_FALLBACK } from '../lib/orgSettings.js'
 import { receivePOLineToBill } from '../lib/vendorBills.js'
 
+// Full lifecycle: draft (being put together) → sent (handed to the
+// supplier, via WhatsApp/email or otherwise) → accepted (supplier
+// confirmed they'll fulfill it) → delivered (goods physically arrived,
+// not yet counted) → partially_received/received (line-by-line counted
+// and logged into stock — see ReceiveLineRow). Each step is a manual
+// admin action; nothing here assumes a supplier integration.
 const STATUS_OPTIONS = [
-  { value: 'draft',               label: 'Draft',               color: 'bg-gray-100  text-gray-600'  },
-  { value: 'ordered',             label: 'Ordered',             color: 'bg-blue-100  text-blue-800'  },
-  { value: 'partially_received',  label: 'Partially Received',  color: 'bg-amber-100 text-amber-800' },
-  { value: 'received',            label: 'Received',            color: 'bg-green-100 text-green-800' },
-  { value: 'cancelled',           label: 'Cancelled',           color: 'bg-red-100   text-red-600'   },
+  { value: 'draft',               label: 'Draft',               color: 'bg-gray-100   text-gray-600'  },
+  { value: 'sent',                label: 'Sent',                color: 'bg-indigo-100 text-indigo-800' },
+  { value: 'accepted',            label: 'Accepted',            color: 'bg-purple-100 text-purple-800' },
+  { value: 'delivered',           label: 'Delivered',           color: 'bg-cyan-100   text-cyan-800'  },
+  { value: 'partially_received',  label: 'Partially Received',  color: 'bg-amber-100  text-amber-800' },
+  { value: 'received',            label: 'Received',            color: 'bg-green-100  text-green-800' },
+  { value: 'cancelled',           label: 'Cancelled',           color: 'bg-red-100    text-red-600'   },
 ]
 const STATUS_MAP = Object.fromEntries(STATUS_OPTIONS.map(s => [s.value, s]))
+// Once a PO has left draft, receiving is allowed at any point up to fully
+// received — some admins will mark every intermediate step, others will
+// jump straight from "sent" to physically receiving stock.
+const RECEIVABLE_STATUSES = ['sent', 'accepted', 'delivered', 'partially_received']
+const OPEN_STATUSES = ['draft', 'sent', 'accepted', 'delivered', 'partially_received']
+
+function buildPOMessage(po, lines, items, business, supplier) {
+  const poLabel = formatDocNumber(business.poPrefix, po.po_number)
+  const itemLines = lines.map(l => {
+    const item = items[l.role_key]
+    return `• ${item?.description || l.role_key} — Qty ${l.qty_ordered} @ ${formatKsh(l.unit_cost_kes)} = ${formatKsh(l.line_total_kes ?? l.qty_ordered * l.unit_cost_kes)}`
+  }).join('\n')
+  return [
+    `Purchase Order ${poLabel}`,
+    `From: ${business.businessName}`,
+    supplier?.name ? `To: ${supplier.name}` : null,
+    '',
+    itemLines,
+    '',
+    `Total: ${formatKsh(po.total_kes)}`,
+    po.expected_date ? `Expected delivery: ${po.expected_date}` : null,
+    po.notes ? `\nNotes: ${po.notes}` : null,
+    '',
+    'Please confirm receipt of this order.',
+  ].filter(l => l !== null).join('\n')
+}
+
+function SendPOButtons({ po, supplier, lines, items, business, onSent }) {
+  const message = buildPOMessage(po, lines, items, business, supplier)
+  const waNumber = (supplier?.phone || '').replace(/\D/g, '')
+  return (
+    <div className="flex gap-2 flex-wrap">
+      {waNumber ? (
+        <a href={`https://wa.me/${waNumber}?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer"
+          onClick={onSent}
+          className="text-xs font-bold bg-green-500 hover:bg-green-600 text-white px-3 py-2 rounded-lg transition">
+          📤 Send via WhatsApp
+        </a>
+      ) : (
+        <span className="text-xs text-gray-400 italic px-1 py-2">No supplier phone on file for WhatsApp</span>
+      )}
+      {supplier?.email ? (
+        <a href={`mailto:${supplier.email}?subject=${encodeURIComponent(`Purchase Order ${formatDocNumber(business.poPrefix, po.po_number)}`)}&body=${encodeURIComponent(message)}`}
+          onClick={onSent}
+          className="text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg transition">
+          📤 Send via Email
+        </a>
+      ) : (
+        <span className="text-xs text-gray-400 italic px-1 py-2">No supplier email on file</span>
+      )}
+    </div>
+  )
+}
 
 // A PO is a request to a supplier, created and sent before any real
 // invoice exists — unit_cost_kes here is a planned/quoted figure, not
@@ -117,7 +178,7 @@ function ReceiveLineRow({ po, line, item, session, business, onReceived }) {
   const [qty, setQty] = useState(String(remaining))
   const [busy, setBusy] = useState(false)
   const [billError, setBillError] = useState('')
-  const canReceive = ['ordered', 'partially_received'].includes(po.status) && remaining > 0
+  const canReceive = RECEIVABLE_STATUSES.includes(po.status) && remaining > 0
   // If the delivery invoice actually differs from this PO line's planned
   // cost, that's a real-world discrepancy this row can't resolve — the fix
   // is to open the item's Edit page (its Pricing section has the invoice
@@ -271,7 +332,7 @@ export default function AdminPurchaseOrders({ session, business = BUSINESS_FALLB
   }
 
   const filtered = filter === 'all' ? pos : pos.filter(p => p.status === filter)
-  const openTotal = pos.filter(p => ['draft', 'ordered', 'partially_received'].includes(p.status))
+  const openTotal = pos.filter(p => OPEN_STATUSES.includes(p.status))
                         .reduce((s, p) => s + Number(p.total_kes || 0), 0)
   const activeSuppliers = suppliers.filter(s => s.is_active)
 
@@ -281,7 +342,7 @@ export default function AdminPurchaseOrders({ session, business = BUSINESS_FALLB
     <div className="space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {[
-          { label: 'Open POs',      value: pos.filter(p => ['draft','ordered','partially_received'].includes(p.status)).length, c: 'bg-blue-50 text-blue-800'  },
+          { label: 'Open POs',      value: pos.filter(p => OPEN_STATUSES.includes(p.status)).length,                            c: 'bg-blue-50 text-blue-800'  },
           { label: 'Open Value',    value: formatKsh(openTotal),                                                                 c: 'bg-amber-50 text-amber-800' },
           { label: 'Received',      value: pos.filter(p => p.status === 'received').length,                                     c: 'bg-green-50 text-green-800' },
         ].map(s => (
@@ -337,11 +398,20 @@ export default function AdminPurchaseOrders({ session, business = BUSINESS_FALLB
                   ))}
                 </div>
                 {po.notes && <div className="text-xs text-gray-500 italic">{po.notes}</div>}
+
+                {po.status === 'draft' && (
+                  <SendPOButtons po={po} supplier={supplier} lines={lines} items={items} business={business}
+                    onSent={() => setStatus(po, 'sent')} />
+                )}
+
                 <div className="flex gap-2 flex-wrap">
-                  {po.status === 'draft' && (
-                    <button onClick={() => setStatus(po, 'ordered')} className="text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg transition">Mark as Ordered</button>
+                  {po.status === 'sent' && (
+                    <button onClick={() => setStatus(po, 'accepted')} className="text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded-lg transition">Mark as Accepted</button>
                   )}
-                  {['draft', 'ordered'].includes(po.status) && !lines.some(l => l.qty_received > 0) && (
+                  {['sent', 'accepted'].includes(po.status) && (
+                    <button onClick={() => setStatus(po, 'delivered')} className="text-xs font-bold bg-cyan-600 hover:bg-cyan-700 text-white px-3 py-2 rounded-lg transition">Mark as Delivered</button>
+                  )}
+                  {['draft', 'sent', 'accepted'].includes(po.status) && !lines.some(l => l.qty_received > 0) && (
                     <button onClick={() => setStatus(po, 'cancelled')} className="text-xs font-bold bg-red-100 hover:bg-red-200 text-red-700 px-3 py-2 rounded-lg transition">Cancel PO</button>
                   )}
                 </div>
