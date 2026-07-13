@@ -157,6 +157,15 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
   const [submitError, setSubmitError] = useState('')
   const [saving, setSaving] = useState(false)
 
+  // Specs sourced from a real manufacturer datasheet (see migration 032)
+  // are locked against casual retyping — an admin has to deliberately hit
+  // "Unlock to correct" first. Saving after unlocking demotes the row back
+  // to unverified, since we can no longer promise the values still match
+  // the datasheet once they're editable again.
+  const specsVerified = isEdit && editRow?.specs_verified === true
+  const [specsUnlocked, setSpecsUnlocked] = useState(false)
+  const specsLocked = specsVerified && !specsUnlocked
+
   function validateRequired(key: 'sku' | 'description' | 'buyingPriceKes', value: string): string | null {
     if (key === 'sku' && !value.trim()) return 'Brand/model is required.'
     if (key === 'description' && !value.trim()) return 'Description is required.'
@@ -262,6 +271,7 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
       payload.in_stock = form.inStock
       payload.image_url = form.imageUrl || null
       payload.datasheet_url = form.datasheetUrl || null
+      payload.specs_verified = specsUnlocked ? false : editRow.specs_verified === true
       payload.updated_at = new Date().toISOString()
 
       // Non-null: this form only renders post-admin-login, which itself
@@ -316,36 +326,39 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
     else updateTop('datasheetUrl', data.publicUrl)
   }
 
-  const fieldClass = (key: string) =>
-    `border rounded-lg px-2 py-1.5 text-sm outline-none ${errors[key] ? 'border-red-400 focus:border-red-500' : 'border-gray-200 focus:border-blue-400'}`
+  const fieldClass = (key: string, disabled?: boolean) =>
+    `border rounded-lg px-2 py-1.5 text-sm outline-none ${
+      disabled ? 'border-gray-100 bg-gray-50 text-gray-400 cursor-not-allowed'
+        : errors[key] ? 'border-red-400 focus:border-red-500' : 'border-gray-200 focus:border-blue-400'
+    }`
 
   // Labels are permanent, unlike placeholder text — a placeholder disappears
   // the moment a value is typed, so a saved numeric field (e.g. "590") would
   // otherwise give no clue what it means once the form is reopened for editing.
-  function TextField({ path, label, value, onChange, wide, required }: {
+  function TextField({ path, label, value, onChange, wide, required, disabled }: {
     path: string; label: string; value: string
-    onChange: (e: ChangeEvent<HTMLInputElement>) => void; wide?: boolean; required?: boolean
+    onChange: (e: ChangeEvent<HTMLInputElement>) => void; wide?: boolean; required?: boolean; disabled?: boolean
   }) {
     return (
       <div className={wide ? 'col-span-2' : ''}>
         <label className="block text-xs text-gray-500 mb-1">
           {label}{!required && <span className="text-gray-300"> — optional</span>}
         </label>
-        <input type="number" value={value} onChange={onChange}
-          className={`w-full ${fieldClass(path)}`} />
+        <input type="number" value={value} onChange={onChange} disabled={disabled}
+          className={`w-full ${fieldClass(path, disabled)}`} />
         {errors[path] && <p className="text-xs text-red-600 mt-0.5">{errors[path]}</p>}
       </div>
     )
   }
 
-  function SelectField({ path, label, value, onChange, options }: {
+  function SelectField({ path, label, value, onChange, options, disabled }: {
     path: string; label: string; value: string; onChange: (e: ChangeEvent<HTMLSelectElement>) => void
-    options: { value: string; label: string }[]
+    options: { value: string; label: string }[]; disabled?: boolean
   }) {
     return (
       <div>
         <label className="block text-xs text-gray-500 mb-1">{label} <span className="text-gray-300">— optional</span></label>
-        <select value={value} onChange={onChange} className={`w-full bg-white ${fieldClass(path)}`}>
+        <select value={value} onChange={onChange} disabled={disabled} className={`w-full bg-white ${fieldClass(path, disabled)}`}>
           <option value="">— choose —</option>
           {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
@@ -380,10 +393,10 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
       </div>
       <div className="grid grid-cols-2 gap-2">
         {meta && (
-          <TextField path="capacity" label={`${meta.capacityLabel} (${meta.capacityUnit})`}
+          <TextField path="capacity" label={`${meta.capacityLabel} (${meta.capacityUnit})`} disabled={specsLocked}
             value={form.capacity} onChange={e => updateTop('capacity', e.target.value)} />
         )}
-        <TextField path="unitWeightKg" label="Weight (kg)"
+        <TextField path="unitWeightKg" label="Weight (kg)" disabled={specsLocked}
           value={form.unitWeightKg} onChange={e => updateTop('unitWeightKg', e.target.value)} />
       </div>
       <div>
@@ -396,14 +409,31 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
 
       {isProductCategory && (
         <>
+          {specsVerified && (
+            <div className={`rounded-xl p-3 text-xs flex items-center justify-between gap-3 ${
+              specsUnlocked ? 'bg-amber-50 border border-amber-200 text-amber-800' : 'bg-emerald-50 border border-emerald-200 text-emerald-800'}`}>
+              <span>
+                {specsUnlocked
+                  ? '🔓 Unlocked — saving now will mark these specs as no longer verified.'
+                  : '🔒 Verified from an official manufacturer datasheet. Specs below are locked to prevent accidental changes.'}
+              </span>
+              {!specsUnlocked && (
+                <button type="button" onClick={() => setSpecsUnlocked(true)}
+                  className="font-bold text-blue-600 hover:text-blue-800 whitespace-nowrap">
+                  Unlock to correct
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="pt-2 border-t border-gray-100">
             <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Dimensions (mm)</div>
             <div className="grid grid-cols-3 gap-2">
-              <TextField path="dimensions.lengthMm" label="Length (mm)" value={form.dimensions.lengthMm}
+              <TextField path="dimensions.lengthMm" label="Length (mm)" value={form.dimensions.lengthMm} disabled={specsLocked}
                 onChange={e => updateGroup('dimensions', 'lengthMm', e.target.value)} />
-              <TextField path="dimensions.widthMm" label="Width (mm)" value={form.dimensions.widthMm}
+              <TextField path="dimensions.widthMm" label="Width (mm)" value={form.dimensions.widthMm} disabled={specsLocked}
                 onChange={e => updateGroup('dimensions', 'widthMm', e.target.value)} />
-              <TextField path="dimensions.thicknessMm" label="Thickness (mm)" value={form.dimensions.thicknessMm}
+              <TextField path="dimensions.thicknessMm" label="Thickness (mm)" value={form.dimensions.thicknessMm} disabled={specsLocked}
                 onChange={e => updateGroup('dimensions', 'thicknessMm', e.target.value)} />
             </div>
           </div>
@@ -411,9 +441,9 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
           <div>
             <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Electrical</div>
             <div className="grid grid-cols-2 gap-2">
-              <TextField path="electrical.nominalVoltageV" label="Nominal voltage — Vmp (V)" value={form.electrical.nominalVoltageV}
+              <TextField path="electrical.nominalVoltageV" label="Nominal voltage — Vmp (V)" value={form.electrical.nominalVoltageV} disabled={specsLocked}
                 onChange={e => updateGroup('electrical', 'nominalVoltageV', e.target.value)} />
-              <TextField path="electrical.maxCurrentAmps" label="Max current — Isc (A)" value={form.electrical.maxCurrentAmps}
+              <TextField path="electrical.maxCurrentAmps" label="Max current — Isc (A)" value={form.electrical.maxCurrentAmps} disabled={specsLocked}
                 onChange={e => updateGroup('electrical', 'maxCurrentAmps', e.target.value)} />
             </div>
           </div>
@@ -421,15 +451,15 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
           <div>
             <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Environmental</div>
             <div className="grid grid-cols-3 gap-2">
-              <TextField path="environmental.operatingTempMinC" label="Min operating temp (°C)" value={form.environmental.operatingTempMinC}
+              <TextField path="environmental.operatingTempMinC" label="Min operating temp (°C)" value={form.environmental.operatingTempMinC} disabled={specsLocked}
                 onChange={e => updateGroup('environmental', 'operatingTempMinC', e.target.value)} />
-              <TextField path="environmental.operatingTempMaxC" label="Max operating temp (°C)" value={form.environmental.operatingTempMaxC}
+              <TextField path="environmental.operatingTempMaxC" label="Max operating temp (°C)" value={form.environmental.operatingTempMaxC} disabled={specsLocked}
                 onChange={e => updateGroup('environmental', 'operatingTempMaxC', e.target.value)} />
               <div>
                 <label className="block text-xs text-gray-500 mb-1">IP rating <span className="text-gray-300">— optional</span></label>
-                <input placeholder="e.g. IP65" value={form.environmental.ipRating}
+                <input placeholder="e.g. IP65" value={form.environmental.ipRating} disabled={specsLocked}
                   onChange={e => updateGroup('environmental', 'ipRating', e.target.value)}
-                  className={`w-full ${fieldClass('environmental.ipRating')}`} />
+                  className={`w-full ${fieldClass('environmental.ipRating', specsLocked)}`} />
                 {errors['environmental.ipRating'] && <p className="text-xs text-red-600 mt-0.5">{errors['environmental.ipRating']}</p>}
               </div>
             </div>
@@ -439,17 +469,17 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
             <div>
               <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Panel Specs</div>
               <div className="grid grid-cols-3 gap-2">
-                <TextField path="panel.efficiencyPct" label="Efficiency (%)" value={form.panel.efficiencyPct}
+                <TextField path="panel.efficiencyPct" label="Efficiency (%)" value={form.panel.efficiencyPct} disabled={specsLocked}
                   onChange={e => updateGroup('panel', 'efficiencyPct', e.target.value)} />
-                <TextField path="panel.warrantyYears" label="Warranty (yr)" value={form.panel.warrantyYears}
+                <TextField path="panel.warrantyYears" label="Warranty (yr)" value={form.panel.warrantyYears} disabled={specsLocked}
                   onChange={e => updateGroup('panel', 'warrantyYears', e.target.value)} />
-                <TextField path="panel.degradationPctYr" label="Degradation (%/yr)" value={form.panel.degradationPctYr}
+                <TextField path="panel.degradationPctYr" label="Degradation (%/yr)" value={form.panel.degradationPctYr} disabled={specsLocked}
                   onChange={e => updateGroup('panel', 'degradationPctYr', e.target.value)} />
-                <SelectField path="panel.cellType" label="Cell type" value={form.panel.cellType}
+                <SelectField path="panel.cellType" label="Cell type" value={form.panel.cellType} disabled={specsLocked}
                   onChange={e => updateGroup('panel', 'cellType', e.target.value)} options={CELL_TYPE_OPTIONS} />
-                <TextField path="panel.tempCoefficientPctC" label="Temp coefficient (%/°C)" value={form.panel.tempCoefficientPctC}
+                <TextField path="panel.tempCoefficientPctC" label="Temp coefficient (%/°C)" value={form.panel.tempCoefficientPctC} disabled={specsLocked}
                   onChange={e => updateGroup('panel', 'tempCoefficientPctC', e.target.value)} />
-                <TextField path="panel.vocV" label="Voc — open-circuit voltage (V)" value={form.panel.vocV}
+                <TextField path="panel.vocV" label="Voc — open-circuit voltage (V)" value={form.panel.vocV} disabled={specsLocked}
                   onChange={e => updateGroup('panel', 'vocV', e.target.value)} />
               </div>
               <p className="text-[11px] text-gray-400 mt-1">Voc (above) plus the Electrical section's Nominal Voltage (Vmp) and Max Current (Isc) are what let RhiPower check this panel is compatible with a chosen inverter's MPPT input.</p>
@@ -460,31 +490,31 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
             <div>
               <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Inverter Specs</div>
               <div className="grid grid-cols-3 gap-2">
-                <TextField path="inverter.efficiencyPct" label="Efficiency (%)" value={form.inverter.efficiencyPct}
+                <TextField path="inverter.efficiencyPct" label="Efficiency (%)" value={form.inverter.efficiencyPct} disabled={specsLocked}
                   onChange={e => updateGroup('inverter', 'efficiencyPct', e.target.value)} />
-                <TextField path="inverter.warrantyYears" label="Warranty (yr)" value={form.inverter.warrantyYears}
+                <TextField path="inverter.warrantyYears" label="Warranty (yr)" value={form.inverter.warrantyYears} disabled={specsLocked}
                   onChange={e => updateGroup('inverter', 'warrantyYears', e.target.value)} />
-                <TextField path="inverter.mpptCount" label="MPPT tracker count" value={form.inverter.mpptCount}
+                <TextField path="inverter.mpptCount" label="MPPT tracker count" value={form.inverter.mpptCount} disabled={specsLocked}
                   onChange={e => updateGroup('inverter', 'mpptCount', e.target.value)} />
-                <SelectField path="inverter.phase" label="Phase" value={form.inverter.phase}
+                <SelectField path="inverter.phase" label="Phase" value={form.inverter.phase} disabled={specsLocked}
                   onChange={e => updateGroup('inverter', 'phase', e.target.value)} options={PHASE_OPTIONS} />
-                <SelectField path="inverter.inverterType" label="Inverter type" value={form.inverter.inverterType}
+                <SelectField path="inverter.inverterType" label="Inverter type" value={form.inverter.inverterType} disabled={specsLocked}
                   onChange={e => updateGroup('inverter', 'inverterType', e.target.value)} options={INVERTER_TYPE_OPTIONS} />
-                <TextField path="inverter.continuousPowerW" label="Continuous power (W)" value={form.inverter.continuousPowerW}
+                <TextField path="inverter.continuousPowerW" label="Continuous power (W)" value={form.inverter.continuousPowerW} disabled={specsLocked}
                   onChange={e => updateGroup('inverter', 'continuousPowerW', e.target.value)} />
-                <TextField path="inverter.surgePowerW" label="Surge power (W)" value={form.inverter.surgePowerW}
+                <TextField path="inverter.surgePowerW" label="Surge power (W)" value={form.inverter.surgePowerW} disabled={specsLocked}
                   onChange={e => updateGroup('inverter', 'surgePowerW', e.target.value)} />
                 <div className="col-span-2">
                   <label className="block text-xs text-gray-500 mb-1">Comm protocols <span className="text-gray-300">— optional</span></label>
-                  <input placeholder="e.g. CAN, RS485" value={form.inverter.commProtocols}
+                  <input placeholder="e.g. CAN, RS485" value={form.inverter.commProtocols} disabled={specsLocked}
                     onChange={e => updateGroup('inverter', 'commProtocols', e.target.value)}
-                    className={`w-full ${fieldClass('inverter.commProtocols')}`} />
+                    className={`w-full ${fieldClass('inverter.commProtocols', specsLocked)}`} />
                 </div>
-                <TextField path="inverter.mpptMinVoltageV" label="MPPT min voltage (V)" value={form.inverter.mpptMinVoltageV}
+                <TextField path="inverter.mpptMinVoltageV" label="MPPT min voltage (V)" value={form.inverter.mpptMinVoltageV} disabled={specsLocked}
                   onChange={e => updateGroup('inverter', 'mpptMinVoltageV', e.target.value)} />
-                <TextField path="inverter.mpptMaxVoltageV" label="MPPT max voltage (V)" value={form.inverter.mpptMaxVoltageV}
+                <TextField path="inverter.mpptMaxVoltageV" label="MPPT max voltage (V)" value={form.inverter.mpptMaxVoltageV} disabled={specsLocked}
                   onChange={e => updateGroup('inverter', 'mpptMaxVoltageV', e.target.value)} />
-                <TextField path="inverter.maxInputVoltageV" label="Absolute max DC input (V)" value={form.inverter.maxInputVoltageV}
+                <TextField path="inverter.maxInputVoltageV" label="Absolute max DC input (V)" value={form.inverter.maxInputVoltageV} disabled={specsLocked}
                   onChange={e => updateGroup('inverter', 'maxInputVoltageV', e.target.value)} />
               </div>
               <p className="text-[11px] text-gray-400 mt-1">MPPT window + max input voltage (above) plus the Electrical section's Max Current are what let RhiPower check a chosen panel is compatible with this inverter's MPPT input.</p>
@@ -495,15 +525,15 @@ export default function ItemForm({ category, mode, editRow, cloneFrom, onSaved, 
             <div>
               <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Battery Specs</div>
               <div className="grid grid-cols-3 gap-2">
-                <TextField path="battery.cycleLife" label="Cycle life" value={form.battery.cycleLife}
+                <TextField path="battery.cycleLife" label="Cycle life" value={form.battery.cycleLife} disabled={specsLocked}
                   onChange={e => updateGroup('battery', 'cycleLife', e.target.value)} />
-                <TextField path="battery.dodPct" label="Depth of discharge (%)" value={form.battery.dodPct}
+                <TextField path="battery.dodPct" label="Depth of discharge (%)" value={form.battery.dodPct} disabled={specsLocked}
                   onChange={e => updateGroup('battery', 'dodPct', e.target.value)} />
-                <TextField path="battery.warrantyYears" label="Warranty (yr)" value={form.battery.warrantyYears}
+                <TextField path="battery.warrantyYears" label="Warranty (yr)" value={form.battery.warrantyYears} disabled={specsLocked}
                   onChange={e => updateGroup('battery', 'warrantyYears', e.target.value)} />
-                <SelectField path="battery.chemistryType" label="Chemistry" value={form.battery.chemistryType}
+                <SelectField path="battery.chemistryType" label="Chemistry" value={form.battery.chemistryType} disabled={specsLocked}
                   onChange={e => updateGroup('battery', 'chemistryType', e.target.value)} options={CHEMISTRY_TYPE_OPTIONS} />
-                <TextField path="battery.maxChargeRateC" label="Max charge rate (C)" value={form.battery.maxChargeRateC}
+                <TextField path="battery.maxChargeRateC" label="Max charge rate (C)" value={form.battery.maxChargeRateC} disabled={specsLocked}
                   onChange={e => updateGroup('battery', 'maxChargeRateC', e.target.value)} />
               </div>
             </div>
