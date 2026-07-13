@@ -125,15 +125,15 @@ export default function HardwareCompatibilityMatrix() {
         <span className="text-red-700">🔴 {summary.incompatible} incompatible</span>
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-auto">
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-auto max-h-[70vh]">
         <table className="text-sm border-collapse">
           <thead>
             <tr>
-              <th className="sticky left-0 bg-gray-50 border-b border-r border-gray-100 px-3 py-2 text-left font-bold text-gray-600 z-10">
+              <th className="sticky top-0 left-0 bg-gray-50 border-b border-r border-gray-100 px-3 py-2 text-left font-bold text-gray-600 z-30">
                 Panel \ Inverter
               </th>
               {inverters.map(inv => (
-                <th key={inv.roleKey} className="border-b border-gray-100 px-3 py-2 text-left font-bold text-gray-600 whitespace-nowrap">
+                <th key={inv.roleKey} className="sticky top-0 bg-gray-50 border-b border-gray-100 px-3 py-2 text-left font-bold text-gray-600 whitespace-nowrap z-20">
                   {inv.sku}
                 </th>
               ))}

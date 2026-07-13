@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { formatKsh } from '../lib/calculator.js'
 import { DEFAULT_PRICE_BANDS } from '../data/skuInventory.js'
@@ -580,13 +580,17 @@ function InventoryTable({ session, invSection }) {
     const items = Object.values(rows)
       .filter(r => r.category === category)
       .map(r => {
-        const capacity = r[meta.capacityField] != null ? `${r[meta.capacityField]}${meta.capacityUnit}` : '—'
+        const capacityValue = r[meta.capacityField] != null ? Number(r[meta.capacityField]) : null
+        const capacity = capacityValue != null ? `${capacityValue}${meta.capacityUnit}` : '—'
         const weight   = r.unit_weight_kg != null ? `${r.unit_weight_kg} kg` : ''
         const tier     = getTierBadge(category, Number(r.buying_price_kes || 0), priceBands)
         const tierTxt  = tier ? { budget: '💡 Budget', balanced: '✅ Balanced', premium: '⭐ Premium' }[tier] : '—'
-        return { key: r.role_key, label: r.description, spec: [capacity, weight, tierTxt].filter(Boolean).join(' · ') }
+        return { key: r.role_key, label: r.description, spec: [capacity, weight, tierTxt].filter(Boolean).join(' · '), capacityValue }
       })
-    return { title: meta.title, category, items }
+      // Group same-capacity items together (e.g. all 620W panels), largest capacity first;
+      // items with no recorded capacity sink to the bottom.
+      .sort((a, b) => (b.capacityValue ?? -Infinity) - (a.capacityValue ?? -Infinity))
+    return { title: meta.title, category, items, capacityUnit: meta.capacityUnit, groupByCapacity: true }
   })
   const allGroups = [...productGroups, ...GROUPS]
 
@@ -630,7 +634,18 @@ function InventoryTable({ session, invSection }) {
         <PriceBandsPanel priceBands={priceBands} session={session} onChange={handleBandSaved} />
       )}
 
-      {(invSection === 'products' ? productGroups : GROUPS).map(group => (
+      {(invSection === 'products' ? productGroups : GROUPS).map(group => {
+        // For capacity-grouped categories (panels/inverters/batteries), count
+        // how many items share each capacity value so the subheader can show
+        // "620W · 3 items" — computed once per group, not per row.
+        const capacityCounts = {}
+        if (group.groupByCapacity) {
+          group.items.forEach(item => {
+            capacityCounts[item.capacityValue] = (capacityCounts[item.capacityValue] || 0) + 1
+          })
+        }
+        let lastCapacity = Symbol('none') // sentinel so the very first row always renders a subheader
+        return (
         <div key={group.title} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="bg-gray-50 border-b border-gray-100 px-5 py-3 flex items-center justify-between">
             <h3 className="font-black text-gray-700 text-sm">{group.title}</h3>
@@ -664,8 +679,21 @@ function InventoryTable({ session, invSection }) {
                     ? new Date(row.updated_at).toLocaleDateString('en-KE', { day:'2-digit', month:'short' })
                     : '—'
                   const isInactive = row.is_active === false
+                  const showSubheader = group.groupByCapacity && item.capacityValue !== lastCapacity
+                  if (showSubheader) lastCapacity = item.capacityValue
                   return (
-                    <tr key={item.key} className={`hover:bg-gray-50 transition ${!inStock || isInactive ? 'opacity-50' : ''}`}>
+                    <Fragment key={item.key}>
+                      {showSubheader && (
+                        <tr>
+                          <td colSpan={7} className="bg-gray-50/70 px-5 py-1.5 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                            {item.capacityValue != null ? `${item.capacityValue}${group.capacityUnit}` : 'Unspecified capacity'}
+                            <span className="ml-1.5 font-normal normal-case text-gray-400">
+                              · {capacityCounts[item.capacityValue]} item{capacityCounts[item.capacityValue] !== 1 ? 's' : ''}
+                            </span>
+                          </td>
+                        </tr>
+                      )}
+                      <tr className={`hover:bg-gray-50 transition ${!inStock || isInactive ? 'opacity-50' : ''}`}>
                       <td className="px-5 py-3">
                         {group.category ? (
                           <button onClick={() => setViewingItem({ row, category: group.category })} className="text-left">
@@ -713,14 +741,16 @@ function InventoryTable({ session, invSection }) {
                           Edit
                         </button>
                       </td>
-                    </tr>
+                      </tr>
+                    </Fragment>
                   )
                 })}
               </tbody>
             </table>
           </div>
         </div>
-      ))}
+        )
+      })}
 
       {viewingItem && (
         <ItemDetailModal
